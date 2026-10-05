@@ -55,10 +55,11 @@ PyroWave is intended to be built alongside PyroFling with Granite in the normal 
 
 NOTE: This API is still under development and the API/ABI is not yet quite stable.
 
-A small portion of Granite needs to be checked out.
+A pinned Granite revision is tracked as a PyroWave third-party submodule.
+Initialize the repository and its nested dependencies before configuring CMake:
 
 ```
-bash checkout_granite.sh
+git submodule update --init --recursive
 ```
 
 Build normally with CMake and a C API is installed.
@@ -103,13 +104,8 @@ $ ninja install
 
 ### Local development and CLI
 
-For the sample and test applications in this repo however, check out
-the full https://github.com/Themaister/Granite before invoking CMake.
-Build with `-DPYROWAVE_DEVEL=ON` to get the "full" build.
-
-```shell
-git clone --depth 1 --recursive --shallow-submodules https://github.com/Themaister/Granite Granite
-```
+For the sample and test applications in this repo, the same pinned Granite
+submodule is used. Build with `-DPYROWAVE_DEVEL=ON` to get the "full" build.
 
 #### Basic encoder/decoder CLI
 
