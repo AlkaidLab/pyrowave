@@ -37,11 +37,11 @@ struct BitstreamSequenceHeader
 	uint32_t height_minus_1 : 14;
 	uint32_t sequence : 3;
 	uint32_t extended : 1;
-	uint32_t total_blocks : 24;
+	uint32_t total_blocks : 22;
 	uint32_t code : 2;
 	uint32_t chroma_resolution : 1;
 	uint32_t color_primaries : 1;
-	uint32_t transfer_function : 1;
+	uint32_t transfer_function : 2;
 	uint32_t ycbcr_transform : 1;
 	uint32_t ycbcr_range : 1;
 	uint32_t chroma_siting : 1;

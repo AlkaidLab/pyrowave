@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "pyrowave_config.hpp"
+#include "pyrowave_bitstream_header.hpp"
 
 namespace Vulkan
 {
@@ -39,6 +40,7 @@ public:
 	bool decode(Vulkan::CommandBuffer &cmd, const ViewBuffers &views);
 
 	bool decode_is_ready(bool allow_partial_frame) const;
+	bool get_color_metadata(BitstreamColorMetadata &metadata) const;
 
 	// A more refined version of decode_is_ready() that allows a bit more control.
 	// The default is num_pristine_bands = 2 (the next-to-final LL band) and minimum_packet_ratio = 0.9.

@@ -7,6 +7,7 @@
 #include "buffer.hpp"
 #include "pyrowave.h"
 #include "pyrowave_decoder.hpp"
+#include "pyrowave_bitstream_header.hpp"
 #include "pyrowave_encoder.hpp"
 #include "logging.hpp"
 #include "slangmosh_scaler.hpp"
@@ -717,6 +718,17 @@ pyrowave_image_get_image_view(pyrowave_image image, VkImageAspectFlagBits aspect
 		view->view_format = img.get_format();
 		break;
 
+	// Wide-gamut/scRGB capture input for the scaled HDR10 path. The scaler
+	// samples these formats directly; they are not valid decoder storage planes.
+	case VK_FORMAT_R16G16B16A16_SFLOAT:
+	case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+		if (usage == VK_IMAGE_USAGE_STORAGE_BIT)
+			return PYROWAVE_ERROR_INVALID_ARGUMENT;
+		view->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		view->swizzle = VK_COMPONENT_SWIZZLE_IDENTITY;
+		view->view_format = img.get_format();
+		break;
+
 	case VK_FORMAT_R8G8_UNORM:
 	case VK_FORMAT_R16G16_UNORM:
 		if (usage == VK_IMAGE_USAGE_STORAGE_BIT)
@@ -882,11 +894,38 @@ struct pyrowave_encoder_opaque
 	ChromaSubsampling chroma = {};
 	int width = 0;
 	int height = 0;
+	pyrowave_color_metadata color_metadata {
+		PYROWAVE_COLOR_PRIMARIES_BT709,
+		PYROWAVE_TRANSFER_BT709,
+		PYROWAVE_YCBCR_BT709,
+		PYROWAVE_YCBCR_FULL,
+		0,
+	};
 
 	// For scaling path.
 	ImageHandle scaler_planes[3];
 	VideoScaler scaler;
 };
+
+static bool valid_color_metadata(const pyrowave_color_metadata &metadata)
+{
+	return metadata.primaries == PYROWAVE_COLOR_PRIMARIES_BT709 ||
+		metadata.primaries == PYROWAVE_COLOR_PRIMARIES_BT2020;
+}
+
+pyrowave_result
+pyrowave_encoder_set_color_metadata(pyrowave_encoder encoder,
+											const pyrowave_color_metadata *metadata)
+{
+	if (!encoder || !metadata || !valid_color_metadata(*metadata) ||
+		metadata->transfer > PYROWAVE_TRANSFER_HLG ||
+		metadata->transform > PYROWAVE_YCBCR_BT2020 ||
+		metadata->range > PYROWAVE_YCBCR_LIMITED || metadata->chroma_siting > 1)
+		return PYROWAVE_ERROR_INVALID_ARGUMENT;
+
+	encoder->color_metadata = *metadata;
+	return PYROWAVE_SUCCESS;
+}
 
 pyrowave_result
 pyrowave_encoder_create(const pyrowave_encoder_create_info *info, pyrowave_encoder *encoder)
@@ -1470,6 +1509,19 @@ pyrowave_encoder_packetize_with_padding(
 	auto *mapped_meta = encoder->device->map_host_buffer(*encoder->queued_meta, MEMORY_ACCESS_READ_BIT);
 	auto *mapped_bitstream = encoder->device->map_host_buffer(*encoder->queued_bitstream, MEMORY_ACCESS_READ_BIT);
 
+	// The sequence header is part of the payload consumed by packetize().
+	// Populate the negotiated color contract before packetization so every
+	// emitted packet carries the same metadata, including the first packet.
+	if (size >= sizeof(BitstreamSequenceHeader))
+	{
+		auto *header = reinterpret_cast<BitstreamSequenceHeader *>(bitstream);
+		header->color_primaries = encoder->color_metadata.primaries;
+		header->transfer_function = encoder->color_metadata.transfer;
+		header->ycbcr_transform = encoder->color_metadata.transform;
+		header->ycbcr_range = encoder->color_metadata.range;
+		header->chroma_siting = encoder->color_metadata.chroma_siting;
+	}
+
 	*out_packets = encoder->encoder.packetize(
 		reinterpret_cast<Encoder::Packet *>(packets), packet_boundary, bitstream,
 		size, mapped_meta, mapped_bitstream, padding_size);
@@ -1553,6 +1605,15 @@ struct pyrowave_decoder_opaque
 	ChromaSubsampling chroma = {};
 	int width = 0;
 	int height = 0;
+	bool high_precision = false;
+	pyrowave_color_metadata color_metadata {
+		PYROWAVE_COLOR_PRIMARIES_BT709,
+		PYROWAVE_TRANSFER_BT709,
+		PYROWAVE_YCBCR_BT709,
+		PYROWAVE_YCBCR_FULL,
+		0,
+	};
+	bool has_color_metadata = false;
 };
 
 bool pyrowave_decoder_device_prefers_fragment_path(pyrowave_device device)
@@ -1581,6 +1642,7 @@ pyrowave_decoder_create(const pyrowave_decoder_create_info *info, pyrowave_decod
 	dec->fragment_path = info->fragment_path;
 	dec->width = info->width;
 	dec->height = info->height;
+	dec->high_precision = info->output_bit_depth >= 10;
 
 	if (!dec->decoder.init(dec->device, info->width, info->height, dec->chroma, info->fragment_path))
 	{
@@ -1604,7 +1666,29 @@ pyrowave_decoder_push_packet(pyrowave_decoder decoder, const void *data, size_t 
 {
 	Util::set_thread_logging_interface(&null_logger);
 	bool ret = decoder->decoder.push_packet(data, size);
+	if (ret)
+	{
+		BitstreamColorMetadata metadata {};
+		if (decoder->decoder.get_color_metadata(metadata))
+		{
+			decoder->color_metadata.primaries = static_cast<pyrowave_color_primaries>(metadata.color_primaries);
+			decoder->color_metadata.transfer = static_cast<pyrowave_transfer_function>(metadata.transfer_function);
+			decoder->color_metadata.transform = static_cast<pyrowave_ycbcr_transform>(metadata.ycbcr_transform);
+			decoder->color_metadata.range = static_cast<pyrowave_ycbcr_range>(metadata.ycbcr_range);
+			decoder->color_metadata.chroma_siting = metadata.chroma_siting;
+			decoder->has_color_metadata = true;
+		}
+	}
 	return ret ? PYROWAVE_SUCCESS : PYROWAVE_ERROR_INVALID_ARGUMENT;
+}
+
+bool
+pyrowave_decoder_get_color_metadata(pyrowave_decoder decoder, pyrowave_color_metadata *metadata)
+{
+	if (!decoder || !metadata)
+		return false;
+	*metadata = decoder->color_metadata;
+	return decoder->has_color_metadata;
 }
 
 // For error correction purposes, it may be okay to decode a frame which dropped some packets.
@@ -1753,7 +1837,9 @@ pyrowave_decoder_decode_cpu_buffer_synchronous(pyrowave_decoder decoder, const p
 
 		if (!img)
 		{
-			auto info = ImageCreateInfo::immutable_2d_image(buffers->width, buffers->height, VK_FORMAT_R8_UNORM);
+			auto info = ImageCreateInfo::immutable_2d_image(
+				buffers->width, buffers->height,
+				decoder->high_precision ? VK_FORMAT_R16_UNORM : VK_FORMAT_R8_UNORM);
 			info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 			if (decoder->fragment_path)
 			{

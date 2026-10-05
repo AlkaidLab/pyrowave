@@ -37,6 +37,8 @@ struct Decoder::Impl final : public WaveletBuffers
 	int total_blocks_in_sequence = 0;
 	uint32_t last_seq = UINT32_MAX;
 	bool decoded_frame_for_current_sequence = false;
+	BitstreamColorMetadata color_metadata {};
+	bool has_color_metadata = false;
 
 	bool push_packet(const void *data, size_t size);
 	bool decode(CommandBuffer &cmd, const ViewBuffers &views);
@@ -199,6 +201,12 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 				}
 
 				total_blocks_in_sequence = int(seq->total_blocks);
+				color_metadata.color_primaries = seq->color_primaries;
+				color_metadata.transfer_function = seq->transfer_function;
+				color_metadata.ycbcr_transform = seq->ycbcr_transform;
+				color_metadata.ycbcr_range = seq->ycbcr_range;
+				color_metadata.chroma_siting = seq->chroma_siting;
+				has_color_metadata = true;
 			}
 			else
 			{
@@ -262,6 +270,12 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 	}
 
 	return true;
+}
+
+bool Decoder::get_color_metadata(BitstreamColorMetadata &metadata) const
+{
+	metadata = impl->color_metadata;
+	return impl->has_color_metadata;
 }
 
 void Decoder::Impl::init_block_meta()
@@ -908,6 +922,8 @@ void Decoder::Impl::clear()
 	decoded_frame_for_current_sequence = false;
 	total_blocks_in_sequence = block_count_32x32;
 	payload_data_cpu.clear();
+	color_metadata = {};
+	has_color_metadata = false;
 }
 
 bool Decoder::device_prefers_fragment_path(Vulkan::Device &device)
