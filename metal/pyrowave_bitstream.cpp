@@ -177,7 +177,8 @@ bool BitstreamParser::push_packet(const void *data_, size_t size)
 				last_seq = header->sequence;
 			}
 
-			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME)
+			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME ||
+				seq->code == BITSTREAM_EXTENDED_CODE_COLOR_METADATA)
 			{
 				if (seq->width_minus_1 + 1 != uint32_t(layout->width) ||
 				    seq->height_minus_1 + 1 != uint32_t(layout->height))
