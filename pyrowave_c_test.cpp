@@ -37,6 +37,16 @@ static void test_encoder_create_validation()
 	info.device = device;
 	CHECKED(pyrowave_encoder_create(&info, &encoder));
 
+	pyrowave_color_metadata invalid_metadata = {};
+	invalid_metadata.transfer = static_cast<pyrowave_transfer_function>(-1);
+	ASSERT_THAT(pyrowave_encoder_set_color_metadata(encoder, &invalid_metadata) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	invalid_metadata = {};
+	invalid_metadata.transform = static_cast<pyrowave_ycbcr_transform>(2);
+	ASSERT_THAT(pyrowave_encoder_set_color_metadata(encoder, &invalid_metadata) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	invalid_metadata = {};
+	invalid_metadata.range = static_cast<pyrowave_ycbcr_range>(2);
+	ASSERT_THAT(pyrowave_encoder_set_color_metadata(encoder, &invalid_metadata) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+
 	// 0 size not allowed.
 	info.width = 0;
 	info.height = 0;

@@ -909,18 +909,24 @@ struct pyrowave_encoder_opaque
 
 static bool valid_color_metadata(const pyrowave_color_metadata &metadata)
 {
-	return metadata.primaries == PYROWAVE_COLOR_PRIMARIES_BT709 ||
+	const bool valid_primaries = metadata.primaries == PYROWAVE_COLOR_PRIMARIES_BT709 ||
 		metadata.primaries == PYROWAVE_COLOR_PRIMARIES_BT2020;
+	const bool valid_transfer = metadata.transfer == PYROWAVE_TRANSFER_BT709 ||
+		metadata.transfer == PYROWAVE_TRANSFER_PQ ||
+		metadata.transfer == PYROWAVE_TRANSFER_HLG;
+	const bool valid_transform = metadata.transform == PYROWAVE_YCBCR_BT709 ||
+		metadata.transform == PYROWAVE_YCBCR_BT2020;
+	const bool valid_range = metadata.range == PYROWAVE_YCBCR_FULL ||
+		metadata.range == PYROWAVE_YCBCR_LIMITED;
+	return valid_primaries && valid_transfer && valid_transform && valid_range &&
+		metadata.chroma_siting <= 1;
 }
 
 pyrowave_result
 pyrowave_encoder_set_color_metadata(pyrowave_encoder encoder,
 											const pyrowave_color_metadata *metadata)
 {
-	if (!encoder || !metadata || !valid_color_metadata(*metadata) ||
-		metadata->transfer > PYROWAVE_TRANSFER_HLG ||
-		metadata->transform > PYROWAVE_YCBCR_BT2020 ||
-		metadata->range > PYROWAVE_YCBCR_LIMITED || metadata->chroma_siting > 1)
+	if (!encoder || !metadata || !valid_color_metadata(*metadata))
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
 	encoder->encoder.set_color_metadata({
