@@ -191,7 +191,8 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 				last_seq = header->sequence;
 			}
 
-			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME)
+			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME ||
+				seq->code == BITSTREAM_EXTENDED_CODE_COLOR_METADATA)
 			{
 				if (seq->width_minus_1 + 1 != width || seq->height_minus_1 + 1 != height)
 				{
@@ -202,7 +203,9 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 
 				total_blocks_in_sequence = int(seq->total_blocks);
 				color_metadata.color_primaries = seq->color_primaries;
-				color_metadata.transfer_function = seq->transfer_function;
+				color_metadata.transfer_function = seq->code == BITSTREAM_EXTENDED_CODE_COLOR_METADATA
+					? static_cast<uint32_t>(TRANSFER_FUNCTION_HLG)
+					: seq->transfer_function;
 				color_metadata.ycbcr_transform = seq->ycbcr_transform;
 				color_metadata.ycbcr_range = seq->ycbcr_range;
 				color_metadata.chroma_siting = seq->chroma_siting;

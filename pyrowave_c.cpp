@@ -923,6 +923,13 @@ pyrowave_encoder_set_color_metadata(pyrowave_encoder encoder,
 		metadata->range > PYROWAVE_YCBCR_LIMITED || metadata->chroma_siting > 1)
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
+	encoder->encoder.set_color_metadata({
+		static_cast<pyrowave_color_primaries>(metadata->primaries),
+		static_cast<pyrowave_transfer_function>(metadata->transfer),
+		static_cast<pyrowave_ycbcr_transform>(metadata->transform),
+		static_cast<pyrowave_ycbcr_range>(metadata->range),
+		metadata->chroma_siting,
+	});
 	encoder->color_metadata = *metadata;
 	return PYROWAVE_SUCCESS;
 }
@@ -1509,19 +1516,6 @@ pyrowave_encoder_packetize_with_padding(
 	auto *mapped_meta = encoder->device->map_host_buffer(*encoder->queued_meta, MEMORY_ACCESS_READ_BIT);
 	auto *mapped_bitstream = encoder->device->map_host_buffer(*encoder->queued_bitstream, MEMORY_ACCESS_READ_BIT);
 
-	// The sequence header is part of the payload consumed by packetize().
-	// Populate the negotiated color contract before packetization so every
-	// emitted packet carries the same metadata, including the first packet.
-	if (size >= sizeof(BitstreamSequenceHeader))
-	{
-		auto *header = reinterpret_cast<BitstreamSequenceHeader *>(bitstream);
-		header->color_primaries = encoder->color_metadata.primaries;
-		header->transfer_function = encoder->color_metadata.transfer;
-		header->ycbcr_transform = encoder->color_metadata.transform;
-		header->ycbcr_range = encoder->color_metadata.range;
-		header->chroma_siting = encoder->color_metadata.chroma_siting;
-	}
-
 	*out_packets = encoder->encoder.packetize(
 		reinterpret_cast<Encoder::Packet *>(packets), packet_boundary, bitstream,
 		size, mapped_meta, mapped_bitstream, padding_size);
@@ -1823,7 +1817,10 @@ pyrowave_decoder_decode_cpu_buffer_synchronous(pyrowave_decoder decoder, const p
 			plane_height /= 2;
 		}
 
-		const size_t plane_bpp = 1;
+		// R16_UNORM readback uses two bytes per sample. The public stride and
+		// plane-size fields are byte counts, so validate the caller's buffers
+		// against the actual image format before submitting the copy.
+		const size_t plane_bpp = decoder->high_precision ? 2 : 1;
 
 		if (buffers->row_stride_in_bytes[plane] < plane_width * plane_bpp)
 			return PYROWAVE_ERROR_INVALID_ARGUMENT;

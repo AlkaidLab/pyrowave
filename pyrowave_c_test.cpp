@@ -364,6 +364,15 @@ static void test_basic_encoder_roundtrip(bool fragment_decode, bool nv12_encode,
 	CHECKED(pyrowave_decoder_create(&decoder_info, &decoder));
 	CHECKED(pyrowave_encoder_create(&encoder_info, &encoder));
 
+	const pyrowave_color_metadata expected_color_metadata = {
+		PYROWAVE_COLOR_PRIMARIES_BT2020,
+		PYROWAVE_TRANSFER_HLG,
+		PYROWAVE_YCBCR_BT2020,
+		PYROWAVE_YCBCR_FULL,
+		1,
+	};
+	CHECKED(pyrowave_encoder_set_color_metadata(encoder, &expected_color_metadata));
+
 	uint8_t luma[Height][Width] = {};
 	uint8_t cb[Height][Width] = {};
 	uint8_t cr[Height][Width] = {};
@@ -457,6 +466,13 @@ static void test_basic_encoder_roundtrip(bool fragment_decode, bool nv12_encode,
 
 	CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.data() + packet.offset, packet.size));
 	ASSERT_THAT(pyrowave_decoder_decode_is_ready(decoder, false));
+	pyrowave_color_metadata decoded_color_metadata = {};
+	ASSERT_THAT(pyrowave_decoder_get_color_metadata(decoder, &decoded_color_metadata));
+	ASSERT_THAT(decoded_color_metadata.primaries == expected_color_metadata.primaries);
+	ASSERT_THAT(decoded_color_metadata.transfer == expected_color_metadata.transfer);
+	ASSERT_THAT(decoded_color_metadata.transform == expected_color_metadata.transform);
+	ASSERT_THAT(decoded_color_metadata.range == expected_color_metadata.range);
+	ASSERT_THAT(decoded_color_metadata.chroma_siting == expected_color_metadata.chroma_siting);
 	ASSERT_THAT(pyrowave_decoder_decode_is_ready_with_sideband(decoder, false, 4, 0.0f, nullptr, 0));
 	pyrowave_decoder_clear(decoder);
 	ASSERT_THAT(!pyrowave_decoder_decode_is_ready(decoder, false));

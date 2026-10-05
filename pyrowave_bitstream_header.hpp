@@ -27,6 +27,10 @@ static_assert(sizeof(BitstreamHeader) == 8, "BitstreamHeader is not 8 bytes.");
 enum
 {
 	BITSTREAM_EXTENDED_CODE_START_OF_FRAME = 0,
+	// Uses the legacy sequence-header layout but selects the negotiated
+	// color-metadata extension. In this first extension, code=1 represents HLG;
+	// all other color fields remain in their legacy one-bit positions.
+	BITSTREAM_EXTENDED_CODE_COLOR_METADATA = 1,
 };
 
 enum
@@ -74,11 +78,12 @@ struct BitstreamSequenceHeader
 	uint32_t height_minus_1 : 14;
 	uint32_t sequence : 3;
 	uint32_t extended : 1;
-	uint32_t total_blocks : 22;
+	// Keep the code=0 layout identical to the upstream bitstream contract.
+	uint32_t total_blocks : 24;
 	uint32_t code : 2;
 	uint32_t chroma_resolution : 1;
 	uint32_t color_primaries : 1;
-	uint32_t transfer_function : 2;
+	uint32_t transfer_function : 1;
 	uint32_t ycbcr_transform : 1;
 	uint32_t ycbcr_range : 1;
 	uint32_t chroma_siting : 1;

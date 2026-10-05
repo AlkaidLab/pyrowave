@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "pyrowave_config.hpp"
+#include "pyrowave_bitstream_header.hpp"
 
 namespace Vulkan
 {
@@ -35,6 +36,7 @@ public:
 	};
 
 	bool init(Vulkan::Device *device, int width, int height, ChromaSubsampling chroma);
+	void set_color_metadata(const BitstreamColorMetadata &metadata);
 	bool encode(Vulkan::CommandBuffer &cmd, const ViewBuffers &views, const BitstreamBuffers &buffers);
 
 	// Debug hackery

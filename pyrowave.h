@@ -630,8 +630,10 @@ typedef struct pyrowave_decoder_create_info
 	int height;
 	pyrowave_chroma_subsampling chroma;
 	bool fragment_path;
-	// 0 selects the original 8-bit R8_UNORM output planes. Values >= 10
-	// select R16_UNORM GPU output planes for static PQ/HLG presentation.
+	// Values below 10 select 8-bit R8_UNORM output planes. Values >= 10
+	// select 16-bit R16_UNORM output planes for static PQ/HLG presentation.
+	// For CPU readback, callers must allocate each plane with two bytes per
+	// sample and provide row_stride_in_bytes/plane_size_in_bytes in bytes.
 	uint32_t output_bit_depth;
 } pyrowave_decoder_create_info;
 

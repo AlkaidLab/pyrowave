@@ -106,7 +106,13 @@ struct Encoder::Impl final : public WaveletBuffers
 	void compute_block_active_words(int bands, uint32_t *words, size_t word_count, const void *mapped_meta) const;
 
 	uint32_t sequence_count = 0;
+	BitstreamColorMetadata color_metadata {};
 };
+
+void Encoder::set_color_metadata(const BitstreamColorMetadata &metadata)
+{
+	impl->color_metadata = metadata;
+}
 
 float Encoder::Impl::get_quant_rdo_distortion_scale(int level, int component, int band) const
 {
@@ -1107,9 +1113,16 @@ size_t Encoder::Impl::packetize(Packet *packets, size_t packet_boundary, size_t 
 	header.height_minus_1 = height - 1;
 	header.sequence = reinterpret_cast<const BitstreamHeader *>(input_bitstream + meta[0].offset_u32)->sequence;
 	header.extended = 1;
-	header.code = BITSTREAM_EXTENDED_CODE_START_OF_FRAME;
+	header.code = color_metadata.transfer_function == TRANSFER_FUNCTION_HLG
+		? BITSTREAM_EXTENDED_CODE_COLOR_METADATA
+		: BITSTREAM_EXTENDED_CODE_START_OF_FRAME;
 	header.total_blocks = num_non_zero_blocks;
 	header.chroma_resolution = chroma == ChromaSubsampling::Chroma444 ? CHROMA_RESOLUTION_444 : CHROMA_RESOLUTION_420;
+	header.color_primaries = color_metadata.color_primaries;
+	header.transfer_function = color_metadata.transfer_function == TRANSFER_FUNCTION_PQ ? 1 : 0;
+	header.ycbcr_transform = color_metadata.ycbcr_transform;
+	header.ycbcr_range = color_metadata.ycbcr_range;
+	header.chroma_siting = color_metadata.chroma_siting;
 
 	assert(sizeof(header) <= size);
 	memcpy(output_bitstream, &header, sizeof(header));
