@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 
 #include "context.hpp"
 #include "device.hpp"

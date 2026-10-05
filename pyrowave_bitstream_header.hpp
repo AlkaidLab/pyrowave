@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Hans-Kristian Arntzen and Foundation Sunshine contributors
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 #pragma once
 
 #include <stdint.h>

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 AlkaidLab contributors
+# SPDX-License-Identifier: MIT AND GPL-3.0-only
+
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 99)
