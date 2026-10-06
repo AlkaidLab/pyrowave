@@ -8,8 +8,13 @@ AlkaidLab.
 - Changes made in this fork are licensed under the GNU General Public License,
   version 3, only (GPL-3.0-only).
 - Files that contain both upstream code and fork changes use the SPDX
-  expression `MIT AND GPL-3.0-only`. The MIT terms apply to the upstream
-  portions and the GPL-3.0-only terms apply to the fork changes.
+  expression `MIT AND GPL-3.0-only`. This is a dual-coverage declaration for
+  the complete combined file: unchanged upstream portions retain their MIT
+  license, while AlkaidLab-authored additions and changes are GPL-3.0-only.
+  The expression does not relicense the upstream portions, and the source
+  history is the record for distinguishing the two portions. A redistribution
+  of a combined file must preserve both applicable license notices and comply
+  with both licenses.
 - The GPL-3.0-only text is provided in `LICENSES/GPL-3.0-only.txt`.
 
 Do not remove the upstream copyright and license notices when redistributing

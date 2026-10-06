@@ -125,7 +125,9 @@ pyrowave-decode out.wave out.y4m
 ## License
 
 This fork contains upstream PyroWave code under the MIT License and
-AlkaidLab-maintained changes under GPL-3.0-only. Files that combine both
-portions are marked `MIT AND GPL-3.0-only`. See `NOTICE.md` and the complete
-license texts in `LICENSES/` for the exact scope and redistribution terms.
+AlkaidLab-maintained additions and changes under GPL-3.0-only. Combined files
+are marked `MIT AND GPL-3.0-only` to require both licenses for redistribution;
+the expression does not relicense unchanged upstream portions. See
+`NOTICE.md` and the complete license texts in `LICENSES/` for the scope and
+redistribution terms.
 
