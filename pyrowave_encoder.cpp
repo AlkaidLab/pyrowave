@@ -108,6 +108,16 @@ struct Encoder::Impl final : public WaveletBuffers
 
 	uint32_t sequence_count = 0;
 	BitstreamColorMetadata color_metadata {};
+
+	// At low bits-per-pixel targets the default CSF weighting is intentionally
+	// conservative about high-frequency coefficients. That is a good fit for
+	// PyroWave's normal high-bitrate use case, but it makes a game stream look
+	// unnecessarily soft when the user selects a constrained bitrate. Keep the
+	// target size unchanged and bias only the luminance detail bands during RDO;
+	// this trades a little more low-frequency error for visible edge detail.
+	float low_rate_detail_strength = 0.0f;
+
+	void update_low_rate_detail_profile(size_t target_payload_size);
 };
 
 void Encoder::set_color_metadata(const BitstreamColorMetadata &metadata)
@@ -148,8 +158,40 @@ float Encoder::Impl::get_quant_rdo_distortion_scale(int level, int component, in
 	float resolution = get_noise_power_normalized_quant_resolution(level, component, band);
 	float weighted_resolution = csf * resolution;
 
+	// Preserve luminance detail when the requested frame budget is small. The
+	// codec still obeys the exact target payload size; this only changes which
+	// wavelet bands consume the available bits. Chroma and the LL band are left
+	// untouched because spending the constrained budget there does not address
+	// the visible low-bitrate blur.
+	if (component == 0 && band != 0 && low_rate_detail_strength > 0.0f)
+	{
+		const float band_weight = band == 3 ? 1.0f : 0.75f;
+		const float level_weight = 1.0f / (1.0f + 0.5f * float(level));
+		const float boost = 1.0f + low_rate_detail_strength * 0.75f * band_weight * level_weight;
+		weighted_resolution *= boost;
+	}
+
 	// The distortion is scaled in terms of power, not amplitude.
 	return weighted_resolution * weighted_resolution;
+}
+
+void Encoder::Impl::update_low_rate_detail_profile(size_t target_payload_size)
+{
+	if (width <= 0 || height <= 0 || target_payload_size == 0)
+	{
+		low_rate_detail_strength = 0.0f;
+		return;
+	}
+
+	const double bits_per_pixel =
+		double(target_payload_size) * 8.0 / (double(width) * double(height));
+
+	// Full detail bias starts below 0.25 bits/pixel and fades out by
+	// 0.75 bits/pixel. These are per-frame bits, so the profile naturally
+	// follows resolution and frame-rate changes without changing the requested
+	// stream bitrate.
+	const double strength = (0.75 - bits_per_pixel) / 0.5;
+	low_rate_detail_strength = float(std::max(0.0, std::min(1.0, strength)));
 }
 
 float Encoder::Impl::get_quant_resolution(int level, int component, int band) const
@@ -1170,6 +1212,7 @@ size_t Encoder::Impl::packetize(Packet *packets, size_t packet_boundary, size_t 
 bool Encoder::Impl::encode_quant_and_coding(
 		Vulkan::CommandBuffer &cmd, const BitstreamBuffers &buffers, float quant_scale)
 {
+	update_low_rate_detail_profile(buffers.target_size);
 	cmd.enable_subgroup_size_control(true);
 
 	if (!quant(cmd, quant_scale))
