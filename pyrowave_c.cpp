@@ -694,6 +694,11 @@ pyrowave_image_get_image_view(pyrowave_image image, VkImageAspectFlagBits aspect
 
 	if (aspect == VK_IMAGE_ASPECT_COLOR_BIT)
 	{
+		if (usage == VK_IMAGE_USAGE_STORAGE_BIT &&
+			(img.get_format() == VK_FORMAT_R16G16B16A16_SFLOAT ||
+			 img.get_format() == VK_FORMAT_B10G11R11_UFLOAT_PACK32))
+			return PYROWAVE_ERROR_INVALID_ARGUMENT;
+
 		view->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 		view->swizzle = VK_COMPONENT_SWIZZLE_IDENTITY;
 		view->view_format = img.get_format();

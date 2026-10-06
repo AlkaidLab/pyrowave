@@ -180,6 +180,13 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 				return false;
 			}
 
+			if (seq->total_blocks > uint32_t(block_count_32x32))
+			{
+				LOGE("Sequence block count %u exceeds layout capacity %u.\n",
+				     seq->total_blocks, block_count_32x32);
+				return false;
+			}
+
 			uint8_t diff = (header->sequence - last_seq) & SequenceCountMask;
 			if (last_seq != UINT32_MAX && diff > (SequenceCountMask / 2))
 			{
