@@ -1617,6 +1617,26 @@ struct pyrowave_decoder_opaque
 	bool has_color_metadata = false;
 };
 
+static constexpr pyrowave_color_metadata default_decoder_color_metadata()
+{
+	return {
+		PYROWAVE_COLOR_PRIMARIES_BT709,
+		PYROWAVE_TRANSFER_BT709,
+		PYROWAVE_YCBCR_BT709,
+		PYROWAVE_YCBCR_FULL,
+		0,
+	};
+}
+
+static void clear_decoder_color_metadata(pyrowave_decoder decoder)
+{
+	if (!decoder)
+		return;
+
+	decoder->color_metadata = default_decoder_color_metadata();
+	decoder->has_color_metadata = false;
+}
+
 bool pyrowave_decoder_device_prefers_fragment_path(pyrowave_device device)
 {
 	Util::set_thread_logging_interface(&null_logger);
@@ -1658,7 +1678,11 @@ pyrowave_decoder_create(const pyrowave_decoder_create_info *info, pyrowave_decod
 void pyrowave_decoder_clear(pyrowave_decoder decoder)
 {
 	Util::set_thread_logging_interface(&null_logger);
+	if (!decoder)
+		return;
+
 	decoder->decoder.clear();
+	clear_decoder_color_metadata(decoder);
 }
 
 // A frame is potentially split into multiple packets.
@@ -1667,18 +1691,22 @@ pyrowave_decoder_push_packet(pyrowave_decoder decoder, const void *data, size_t 
 {
 	Util::set_thread_logging_interface(&null_logger);
 	bool ret = decoder->decoder.push_packet(data, size);
-	if (ret)
+	BitstreamColorMetadata metadata {};
+	if (decoder->decoder.get_color_metadata(metadata))
 	{
-		BitstreamColorMetadata metadata {};
-		if (decoder->decoder.get_color_metadata(metadata))
-		{
-			decoder->color_metadata.primaries = static_cast<pyrowave_color_primaries>(metadata.color_primaries);
-			decoder->color_metadata.transfer = static_cast<pyrowave_transfer_function>(metadata.transfer_function);
-			decoder->color_metadata.transform = static_cast<pyrowave_ycbcr_transform>(metadata.ycbcr_transform);
-			decoder->color_metadata.range = static_cast<pyrowave_ycbcr_range>(metadata.ycbcr_range);
-			decoder->color_metadata.chroma_siting = metadata.chroma_siting;
-			decoder->has_color_metadata = true;
-		}
+		decoder->color_metadata.primaries = static_cast<pyrowave_color_primaries>(metadata.color_primaries);
+		decoder->color_metadata.transfer = static_cast<pyrowave_transfer_function>(metadata.transfer_function);
+		decoder->color_metadata.transform = static_cast<pyrowave_ycbcr_transform>(metadata.ycbcr_transform);
+		decoder->color_metadata.range = static_cast<pyrowave_ycbcr_range>(metadata.ycbcr_range);
+		decoder->color_metadata.chroma_siting = metadata.chroma_siting;
+		decoder->has_color_metadata = true;
+	}
+	else
+	{
+		// Decoder::push_packet() can clear the native metadata state when a
+		// new sequence starts. Keep the C wrapper state in sync so callers do
+		// not continue using metadata from the previous sequence.
+		clear_decoder_color_metadata(decoder);
 	}
 	return ret ? PYROWAVE_SUCCESS : PYROWAVE_ERROR_INVALID_ARGUMENT;
 }

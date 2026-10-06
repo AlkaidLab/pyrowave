@@ -486,6 +486,13 @@ static void test_basic_encoder_roundtrip(bool fragment_decode, bool nv12_encode,
 	ASSERT_THAT(decoded_color_metadata.chroma_siting == expected_color_metadata.chroma_siting);
 	ASSERT_THAT(pyrowave_decoder_decode_is_ready_with_sideband(decoder, false, 4, 0.0f, nullptr, 0));
 	pyrowave_decoder_clear(decoder);
+	pyrowave_color_metadata cleared_color_metadata = {};
+	ASSERT_THAT(!pyrowave_decoder_get_color_metadata(decoder, &cleared_color_metadata));
+	ASSERT_THAT(cleared_color_metadata.primaries == PYROWAVE_COLOR_PRIMARIES_BT709);
+	ASSERT_THAT(cleared_color_metadata.transfer == PYROWAVE_TRANSFER_BT709);
+	ASSERT_THAT(cleared_color_metadata.transform == PYROWAVE_YCBCR_BT709);
+	ASSERT_THAT(cleared_color_metadata.range == PYROWAVE_YCBCR_FULL);
+	ASSERT_THAT(cleared_color_metadata.chroma_siting == 0);
 	ASSERT_THAT(!pyrowave_decoder_decode_is_ready(decoder, false));
 	ASSERT_THAT(!pyrowave_decoder_decode_is_ready_with_sideband(decoder, false, 4, 0.0f, nullptr, 0));
 	CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.data() + packet.offset, packet.size));
