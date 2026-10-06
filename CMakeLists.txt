@@ -199,14 +199,23 @@ if (${PROJECT_IS_TOP_LEVEL})
                 DLL_NAME_WITH_SOVERSION ON)
     endif()
 
-    if (PYROWAVE_BUILD_SHARED)
+    if (PYROWAVE_BUILD_SHARED OR PYROWAVE_BUILD_STATIC_C_API)
         install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pyrowave.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pyrowave)
+    endif()
+
+    if (PYROWAVE_BUILD_SHARED)
         install(TARGETS pyrowave-shared EXPORT pyrowave-sharedConfig
                 RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
                 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
                 ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
                 PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pyrowave)
         install(EXPORT pyrowave-sharedConfig DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pyrowave-shared/cmake)
+    endif()
+    if (PYROWAVE_BUILD_STATIC_C_API)
+        install(TARGETS pyrowave-c-api-static
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
     install(TARGETS pyrowave-device-validation RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
