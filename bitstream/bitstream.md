@@ -274,10 +274,10 @@ The kind of extended header is signalled by `code`:
 
 Other values for `code` are reserved for future use which can extend this definition in any required way.
 
-A `BITSTREAM_EXTENDED_CODE_START_OF_FRAME` should be transmitted for every frame of video.
+A sequence header with `code=0` (`BITSTREAM_EXTENDED_CODE_START_OF_FRAME`) or
+`code=1` (`BITSTREAM_EXTENDED_CODE_COLOR_METADATA`, for HLG) should be transmitted for every frame of video.
 This packet may be sent in any order relative to other packets for any given frame.
-A decoder may discard received packet until it has observed
-`BITSTREAM_EXTENDED_CODE_START_OF_FRAME` at least once.
+A decoder may discard received packets until it has observed either supported sequence-header code at least once.
 
 In a video sequence, `width_minus_1`, `height_minus_1` and `chroma_resolution` must remain invariant.
 What a "video sequence" is, is not defined here, but left to relevant higher-level protocols.
