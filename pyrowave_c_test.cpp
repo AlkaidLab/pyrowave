@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 
 #include "vulkan/vulkan.h"
 #include "pyrowave.h"
@@ -36,6 +37,16 @@ static void test_encoder_create_validation()
 
 	info.device = device;
 	CHECKED(pyrowave_encoder_create(&info, &encoder));
+
+	pyrowave_color_metadata invalid_metadata = {};
+	invalid_metadata.transfer = static_cast<pyrowave_transfer_function>(-1);
+	ASSERT_THAT(pyrowave_encoder_set_color_metadata(encoder, &invalid_metadata) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	invalid_metadata = {};
+	invalid_metadata.transform = static_cast<pyrowave_ycbcr_transform>(2);
+	ASSERT_THAT(pyrowave_encoder_set_color_metadata(encoder, &invalid_metadata) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	invalid_metadata = {};
+	invalid_metadata.range = static_cast<pyrowave_ycbcr_range>(2);
+	ASSERT_THAT(pyrowave_encoder_set_color_metadata(encoder, &invalid_metadata) == PYROWAVE_ERROR_INVALID_ARGUMENT);
 
 	// 0 size not allowed.
 	info.width = 0;
@@ -158,6 +169,66 @@ static void test_decode_cpu_buffer_validation(bool fragment_path)
 	for (uint32_t y = 0; y < 8; y++)
 		for (uint32_t x = 0; x < 8; x++)
 			ASSERT_THAT(cr[y][x] == 0x7f || cr[y][x] == 0x80);
+
+	pyrowave_decoder_destroy(decoder);
+	pyrowave_device_destroy(info.device);
+}
+
+static void test_high_precision_cpu_buffer_readback(bool fragment_path)
+{
+	pyrowave_decoder_create_info info = {};
+	info.width = 16;
+	info.height = 16;
+	info.fragment_path = fragment_path;
+	info.output_bit_depth = 10;
+	pyrowave_decoder decoder;
+	CHECKED(pyrowave_create_default_device(&info.device));
+	CHECKED(pyrowave_decoder_create(&info, &decoder));
+
+	for (bool padded : {false, true})
+	{
+		pyrowave_cpu_buffer buffer = {};
+		buffer.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV420P;
+		buffer.width = info.width;
+		buffer.height = info.height;
+		std::vector<uint16_t> planes[3];
+		for (int plane = 0; plane < 3; plane++)
+		{
+			const size_t width = plane == 0 ? 16 : 8;
+			const size_t height = plane == 0 ? 16 : 8;
+			buffer.row_stride_in_bytes[plane] = (width + (padded ? 2 : 0)) * sizeof(uint16_t);
+			buffer.plane_size_in_bytes[plane] = buffer.row_stride_in_bytes[plane] * height;
+			planes[plane].assign(buffer.plane_size_in_bytes[plane] / sizeof(uint16_t) + 8, 0xa55a);
+			buffer.data[plane] = planes[plane].data();
+		}
+		for (int plane = 0; plane < 3; plane++)
+		{
+			const size_t height = plane == 0 ? 16 : 8;
+			auto invalid = buffer;
+			invalid.row_stride_in_bytes[plane]++;
+			invalid.plane_size_in_bytes[plane] = invalid.row_stride_in_bytes[plane] * height;
+			ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &invalid) ==
+			            PYROWAVE_ERROR_INVALID_ARGUMENT);
+			invalid.row_stride_in_bytes[plane] = SIZE_MAX - 1;
+			invalid.plane_size_in_bytes[plane] = SIZE_MAX;
+			ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &invalid) ==
+			            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		}
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &buffer));
+		for (int plane = 0; plane < 3; plane++)
+		{
+			const size_t width = plane == 0 ? 16 : 8;
+			const size_t height = plane == 0 ? 16 : 8;
+			const size_t pitch = buffer.row_stride_in_bytes[plane] / sizeof(uint16_t);
+			for (size_t y = 0; y < height; y++)
+				for (size_t x = 0; x < width; x++)
+					ASSERT_THAT(planes[plane][y * pitch + x] == 0x7fff ||
+					            planes[plane][y * pitch + x] == 0x8000);
+			for (size_t index = buffer.plane_size_in_bytes[plane] / sizeof(uint16_t);
+			     index < planes[plane].size(); index++)
+				ASSERT_THAT(planes[plane][index] == 0xa55a);
+		}
+	}
 
 	pyrowave_decoder_destroy(decoder);
 	pyrowave_device_destroy(info.device);
@@ -364,6 +435,15 @@ static void test_basic_encoder_roundtrip(bool fragment_decode, bool nv12_encode,
 	CHECKED(pyrowave_decoder_create(&decoder_info, &decoder));
 	CHECKED(pyrowave_encoder_create(&encoder_info, &encoder));
 
+	const pyrowave_color_metadata expected_color_metadata = {
+		PYROWAVE_COLOR_PRIMARIES_BT2020,
+		PYROWAVE_TRANSFER_HLG,
+		PYROWAVE_YCBCR_BT2020,
+		PYROWAVE_YCBCR_FULL,
+		1,
+	};
+	CHECKED(pyrowave_encoder_set_color_metadata(encoder, &expected_color_metadata));
+
 	uint8_t luma[Height][Width] = {};
 	uint8_t cb[Height][Width] = {};
 	uint8_t cr[Height][Width] = {};
@@ -457,8 +537,22 @@ static void test_basic_encoder_roundtrip(bool fragment_decode, bool nv12_encode,
 
 	CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.data() + packet.offset, packet.size));
 	ASSERT_THAT(pyrowave_decoder_decode_is_ready(decoder, false));
+	pyrowave_color_metadata decoded_color_metadata = {};
+	ASSERT_THAT(pyrowave_decoder_get_color_metadata(decoder, &decoded_color_metadata));
+	ASSERT_THAT(decoded_color_metadata.primaries == expected_color_metadata.primaries);
+	ASSERT_THAT(decoded_color_metadata.transfer == expected_color_metadata.transfer);
+	ASSERT_THAT(decoded_color_metadata.transform == expected_color_metadata.transform);
+	ASSERT_THAT(decoded_color_metadata.range == expected_color_metadata.range);
+	ASSERT_THAT(decoded_color_metadata.chroma_siting == expected_color_metadata.chroma_siting);
 	ASSERT_THAT(pyrowave_decoder_decode_is_ready_with_sideband(decoder, false, 4, 0.0f, nullptr, 0));
 	pyrowave_decoder_clear(decoder);
+	pyrowave_color_metadata cleared_color_metadata = {};
+	ASSERT_THAT(!pyrowave_decoder_get_color_metadata(decoder, &cleared_color_metadata));
+	ASSERT_THAT(cleared_color_metadata.primaries == PYROWAVE_COLOR_PRIMARIES_BT709);
+	ASSERT_THAT(cleared_color_metadata.transfer == PYROWAVE_TRANSFER_BT709);
+	ASSERT_THAT(cleared_color_metadata.transform == PYROWAVE_YCBCR_BT709);
+	ASSERT_THAT(cleared_color_metadata.range == PYROWAVE_YCBCR_FULL);
+	ASSERT_THAT(cleared_color_metadata.chroma_siting == 0);
 	ASSERT_THAT(!pyrowave_decoder_decode_is_ready(decoder, false));
 	ASSERT_THAT(!pyrowave_decoder_decode_is_ready_with_sideband(decoder, false, 4, 0.0f, nullptr, 0));
 	CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.data() + packet.offset, packet.size));
@@ -716,6 +810,8 @@ int main()
 	printf("Running error handling tests ...\n");
 	test_decode_cpu_buffer_validation(false);
 	test_decode_cpu_buffer_validation(true);
+	test_high_precision_cpu_buffer_readback(false);
+	test_high_precision_cpu_buffer_readback(true);
 	test_encode_cpu_buffer_validation(false);
 	test_encode_cpu_buffer_validation(true);
 	test_encoder_create_validation();

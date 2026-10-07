@@ -1,11 +1,13 @@
 // Copyright (c) 2025 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 #pragma once
 
 #include <memory>
 #include <stddef.h>
 #include <stdint.h>
 #include "pyrowave_config.hpp"
+#include "pyrowave_bitstream_header.hpp"
 
 namespace Vulkan
 {
@@ -35,6 +37,7 @@ public:
 	};
 
 	bool init(Vulkan::Device *device, int width, int height, ChromaSubsampling chroma);
+	void set_color_metadata(const BitstreamColorMetadata &metadata);
 	bool encode(Vulkan::CommandBuffer &cmd, const ViewBuffers &views, const BitstreamBuffers &buffers);
 
 	// Debug hackery

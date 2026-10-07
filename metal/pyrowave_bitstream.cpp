@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 #include "pyrowave_bitstream.hpp"
 #include <algorithm>
 #include <stdio.h>
@@ -165,6 +166,13 @@ bool BitstreamParser::push_packet(const void *data_, size_t size)
 				return false;
 			}
 
+			if (seq->total_blocks > uint32_t(layout->block_count_32x32))
+			{
+				PYROWAVE_LOGE("Sequence block count %u exceeds layout capacity %u.\n",
+				              seq->total_blocks, layout->block_count_32x32);
+				return false;
+			}
+
 			uint8_t diff = (header->sequence - last_seq) & SequenceCountMask;
 			if (last_seq != UINT32_MAX && diff > (SequenceCountMask / 2))
 			{
@@ -177,7 +185,8 @@ bool BitstreamParser::push_packet(const void *data_, size_t size)
 				last_seq = header->sequence;
 			}
 
-			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME)
+			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME ||
+				seq->code == BITSTREAM_EXTENDED_CODE_COLOR_METADATA)
 			{
 				if (seq->width_minus_1 + 1 != uint32_t(layout->width) ||
 				    seq->height_minus_1 + 1 != uint32_t(layout->height))

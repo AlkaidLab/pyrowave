@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 #include "pyrowave_decoder.hpp"
 #include "device.hpp"
 #include "buffer.hpp"
@@ -37,6 +38,8 @@ struct Decoder::Impl final : public WaveletBuffers
 	int total_blocks_in_sequence = 0;
 	uint32_t last_seq = UINT32_MAX;
 	bool decoded_frame_for_current_sequence = false;
+	BitstreamColorMetadata color_metadata {};
+	bool has_color_metadata = false;
 
 	bool push_packet(const void *data, size_t size);
 	bool decode(CommandBuffer &cmd, const ViewBuffers &views);
@@ -177,6 +180,13 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 				return false;
 			}
 
+			if (seq->total_blocks > uint32_t(block_count_32x32))
+			{
+				LOGE("Sequence block count %u exceeds layout capacity %u.\n",
+				     seq->total_blocks, block_count_32x32);
+				return false;
+			}
+
 			uint8_t diff = (header->sequence - last_seq) & SequenceCountMask;
 			if (last_seq != UINT32_MAX && diff > (SequenceCountMask / 2))
 			{
@@ -189,7 +199,8 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 				last_seq = header->sequence;
 			}
 
-			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME)
+			if (seq->code == BITSTREAM_EXTENDED_CODE_START_OF_FRAME ||
+				seq->code == BITSTREAM_EXTENDED_CODE_COLOR_METADATA)
 			{
 				if (seq->width_minus_1 + 1 != width || seq->height_minus_1 + 1 != height)
 				{
@@ -199,6 +210,14 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 				}
 
 				total_blocks_in_sequence = int(seq->total_blocks);
+				color_metadata.color_primaries = seq->color_primaries;
+				color_metadata.transfer_function = seq->code == BITSTREAM_EXTENDED_CODE_COLOR_METADATA
+					? static_cast<uint32_t>(TRANSFER_FUNCTION_HLG)
+					: seq->transfer_function;
+				color_metadata.ycbcr_transform = seq->ycbcr_transform;
+				color_metadata.ycbcr_range = seq->ycbcr_range;
+				color_metadata.chroma_siting = seq->chroma_siting;
+				has_color_metadata = true;
 			}
 			else
 			{
@@ -262,6 +281,12 @@ bool Decoder::Impl::push_packet(const void *data_, size_t size)
 	}
 
 	return true;
+}
+
+bool Decoder::get_color_metadata(BitstreamColorMetadata &metadata) const
+{
+	metadata = impl->color_metadata;
+	return impl->has_color_metadata;
 }
 
 void Decoder::Impl::init_block_meta()
@@ -908,6 +933,8 @@ void Decoder::Impl::clear()
 	decoded_frame_for_current_sequence = false;
 	total_blocks_in_sequence = block_count_32x32;
 	payload_data_cpu.clear();
+	color_metadata = {};
+	has_color_metadata = false;
 }
 
 bool Decoder::device_prefers_fragment_path(Vulkan::Device &device)

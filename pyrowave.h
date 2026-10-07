@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 
 #ifndef PYROWAVE_H_
 #define PYROWAVE_H_
@@ -9,6 +10,7 @@
 #endif
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +22,7 @@ extern "C" {
 
 #define PYROWAVE_API_VERSION_MAJOR 0
 #define PYROWAVE_API_VERSION_MINOR 6
-#define PYROWAVE_API_VERSION_PATCH 0
+#define PYROWAVE_API_VERSION_PATCH 1
 
 #if !defined(PYROWAVE_PUBLIC_API)
 #if defined(PYROWAVE_EXPORT_SYMBOLS)
@@ -383,6 +385,44 @@ typedef struct pyrowave_encoder_create_info
 	pyrowave_chroma_subsampling chroma;
 } pyrowave_encoder_create_info;
 
+typedef enum pyrowave_color_primaries
+{
+	PYROWAVE_COLOR_PRIMARIES_BT709 = 0,
+	PYROWAVE_COLOR_PRIMARIES_BT2020 = 1,
+} pyrowave_color_primaries;
+
+typedef enum pyrowave_transfer_function
+{
+	PYROWAVE_TRANSFER_BT709 = 0,
+	PYROWAVE_TRANSFER_PQ = 1,
+	PYROWAVE_TRANSFER_HLG = 2,
+} pyrowave_transfer_function;
+
+typedef enum pyrowave_ycbcr_transform
+{
+	PYROWAVE_YCBCR_BT709 = 0,
+	PYROWAVE_YCBCR_BT2020 = 1,
+} pyrowave_ycbcr_transform;
+
+typedef enum pyrowave_ycbcr_range
+{
+	PYROWAVE_YCBCR_FULL = 0,
+	PYROWAVE_YCBCR_LIMITED = 1,
+} pyrowave_ycbcr_range;
+
+typedef struct pyrowave_color_metadata
+{
+	pyrowave_color_primaries primaries;
+	pyrowave_transfer_function transfer;
+	pyrowave_ycbcr_transform transform;
+	pyrowave_ycbcr_range range;
+	uint32_t chroma_siting;
+} pyrowave_color_metadata;
+
+PYROWAVE_PUBLIC_API pyrowave_result
+pyrowave_encoder_set_color_metadata(pyrowave_encoder encoder,
+											const pyrowave_color_metadata *metadata);
+
 typedef struct pyrowave_packet
 {
 	size_t offset;
@@ -485,7 +525,8 @@ pyrowave_encoder_encode_gpu_synchronous(pyrowave_encoder encoder,
 
 typedef struct pyrowave_scaled_encode_info
 {
-	// Input view must be some RGB(A) UNORM format.
+	// Input view is normally an RGB(A) UNORM format. R16G16B16A16_SFLOAT is
+	// also accepted for scRGB/HDR10 capture input.
 	// Alternatively, as a special case, NV12 (G8_B8R8_2PLANE_420) is allowed here with COLOR_ASPECT.
 	// This is only intended to be used with pipewire dmabuf screen capture path.
 	// If scaling NV12, the crop-rect (if any) must be aligned to 2 pixel offset and extent.
@@ -590,6 +631,11 @@ typedef struct pyrowave_decoder_create_info
 	int height;
 	pyrowave_chroma_subsampling chroma;
 	bool fragment_path;
+	// Values below 10 select 8-bit R8_UNORM output planes. Values >= 10
+	// select 16-bit R16_UNORM output planes for static PQ/HLG presentation.
+	// For CPU readback, callers must allocate each plane with two bytes per
+	// sample and provide row_stride_in_bytes/plane_size_in_bytes in bytes.
+	uint32_t output_bit_depth;
 } pyrowave_decoder_create_info;
 
 // Fragment path is optimized for typical mobile GPUs which have weak compute support.
@@ -639,6 +685,10 @@ pyrowave_decoder_decode_gpu_buffer(pyrowave_decoder decoder,
 // A command buffer must not be set on pyrowave_device.
 PYROWAVE_PUBLIC_API pyrowave_result
 pyrowave_decoder_decode_cpu_buffer_synchronous(pyrowave_decoder decoder, const pyrowave_cpu_buffer *buffers);
+
+PYROWAVE_PUBLIC_API bool
+pyrowave_decoder_get_color_metadata(pyrowave_decoder decoder,
+										pyrowave_color_metadata *metadata);
 
 // Implementation ensures GPU is idle before destroying objects.
 PYROWAVE_PUBLIC_API void pyrowave_decoder_destroy(pyrowave_decoder decoder);

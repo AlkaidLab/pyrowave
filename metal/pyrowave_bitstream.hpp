@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 #pragma once
 
 // Granite-free CPU side of the PyroWave decoder: bitstream layout, block metadata
@@ -60,6 +61,7 @@ struct BitstreamPacket
 enum
 {
 	BITSTREAM_EXTENDED_CODE_START_OF_FRAME = 0,
+	BITSTREAM_EXTENDED_CODE_COLOR_METADATA = 1,
 };
 
 enum

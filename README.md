@@ -55,10 +55,11 @@ PyroWave is intended to be built alongside PyroFling with Granite in the normal 
 
 NOTE: This API is still under development and the API/ABI is not yet quite stable.
 
-A small portion of Granite needs to be checked out.
+A pinned Granite revision is tracked as a PyroWave third-party submodule.
+Initialize the repository and its nested dependencies before configuring CMake:
 
 ```
-bash checkout_granite.sh
+git submodule update --init --recursive
 ```
 
 Build normally with CMake and a C API is installed.
@@ -86,6 +87,18 @@ That test also serves as a basic user guide for the API.
 
 `build-steamrt.sh` builds against the Sniper SDK and is also supported.
 
+#### Installed static C API
+
+Configure with `-DPYROWAVE_BUILD_SHARED=OFF -DPYROWAVE_BUILD_STATIC_C_API=ON`.
+The installed static archive includes the Pyrowave and Granite dependency
+objects. Its CMake package supplies the C API/Vulkan headers and system link
+requirements, without referring to the original source or build directories:
+
+```cmake
+find_package(pyrowave-static CONFIG REQUIRED)
+target_link_libraries(your_application PRIVATE Pyrowave::pyrowave-c-api-static)
+```
+
 #### Android standalone build
 
 This assumes that NDK is installed somewhere.
@@ -101,15 +114,31 @@ $ cmake .. -DCMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/$NDK_VERSION/build/cmake/and
 $ ninja install
 ```
 
+### CMake subproject
+
+The C API can also be built directly within a parent project's build graph:
+
+```cmake
+set(PYROWAVE_BUILD_SHARED OFF)
+set(PYROWAVE_BUILD_STATIC_C_API ON)
+set(PYROWAVE_BUILD_TESTS OFF)
+set(PYROWAVE_INSTALL OFF)
+set(GRANITE_INSTALL_TARGETS OFF)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+add_subdirectory(third-party/pyrowave pyrowave EXCLUDE_FROM_ALL)
+target_link_libraries(your_application PRIVATE pyrowave-c-api-static)
+```
+
+Initialize the pinned nested submodules before configuration. The static target
+provides the C API and Vulkan include paths and carries its Pyrowave/Granite
+link dependencies; no intermediate source copy or separate build script is
+required. C API tests and Pyrowave install rules default to enabled in a
+standalone build and disabled in a subproject.
+
 ### Local development and CLI
 
-For the sample and test applications in this repo however, check out
-the full https://github.com/Themaister/Granite before invoking CMake.
-Build with `-DPYROWAVE_DEVEL=ON` to get the "full" build.
-
-```shell
-git clone --depth 1 --recursive --shallow-submodules https://github.com/Themaister/Granite Granite
-```
+For the sample and test applications in this repo, the same pinned Granite
+submodule is used. Build with `-DPYROWAVE_DEVEL=ON` to get the "full" build.
 
 #### Basic encoder/decoder CLI
 
@@ -125,4 +154,13 @@ To decode back to y4m:
 ```shell
 pyrowave-decode out.wave out.y4m
 ```
+
+## License
+
+This fork contains upstream PyroWave code under the MIT License and
+AlkaidLab-maintained additions and changes under GPL-3.0-only. Combined files
+are marked `MIT AND GPL-3.0-only` to require both licenses for redistribution;
+the expression does not relicense unchanged upstream portions. See
+`NOTICE.md` and the complete license texts in `LICENSES/` for the scope and
+redistribution terms.
 

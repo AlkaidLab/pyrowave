@@ -1,3 +1,6 @@
+; Copyright (c) 2026 AlkaidLab contributors
+; SPDX-License-Identifier: MIT AND GPL-3.0-only
+
 LIBRARY libpyrowave-shared-0.dll
 
 EXPORTS
@@ -24,6 +27,7 @@ EXPORTS
 	pyrowave_image_get_image_view
 	pyrowave_image_destroy
 	pyrowave_encoder_create
+	pyrowave_encoder_set_color_metadata
 	pyrowave_encoder_encode_gpu_synchronous
 	pyrowave_encoder_encode_gpu_scaled_synchronous
 	pyrowave_encoder_encode_cpu_synchronous
@@ -44,5 +48,6 @@ EXPORTS
 	pyrowave_decoder_decode_is_ready_with_sideband
 	pyrowave_decoder_decode_gpu_buffer
 	pyrowave_decoder_decode_cpu_buffer_synchronous
+	pyrowave_decoder_get_color_metadata
 	pyrowave_decoder_destroy
 

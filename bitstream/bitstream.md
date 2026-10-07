@@ -209,6 +209,7 @@ If `extended` is 1, the definition of the header is reinterpreted to:
 enum
 {
   BITSTREAM_EXTENDED_CODE_START_OF_FRAME = 0,
+  BITSTREAM_EXTENDED_CODE_COLOR_METADATA = 1,
 };
 
 enum
@@ -244,7 +245,8 @@ enum
 enum
 {
   TRANSFER_FUNCTION_BT709 = 0,
-  TRANSFER_FUNCTION_PQ = 1
+  TRANSFER_FUNCTION_PQ = 1,
+  TRANSFER_FUNCTION_HLG = 2
 };
 
 struct BitstreamSequenceHeader
@@ -264,14 +266,18 @@ struct BitstreamSequenceHeader
 };
 ```
 
-The only defined extended header is currently this one. The kind of header is signalled by
-`code` for which only `BITSTREAM_EXTENDED_CODE_START_OF_FRAME` is defined.
-Other values for `code` is reserved for future use which can extend this definition in any required way.
+The kind of extended header is signalled by `code`:
 
-A `BITSTREAM_EXTENDED_CODE_START_OF_FRAME` should be transmitted for every frame of video.
+- `BITSTREAM_EXTENDED_CODE_START_OF_FRAME` (0) uses the legacy color-metadata fields;
+- `BITSTREAM_EXTENDED_CODE_COLOR_METADATA` (1) indicates HLG and uses the legacy layout
+  for the remaining color-metadata fields.
+
+Other values for `code` are reserved for future use which can extend this definition in any required way.
+
+A sequence header with `code=0` (`BITSTREAM_EXTENDED_CODE_START_OF_FRAME`) or
+`code=1` (`BITSTREAM_EXTENDED_CODE_COLOR_METADATA`, for HLG) should be transmitted for every frame of video.
 This packet may be sent in any order relative to other packets for any given frame.
-A decoder may discard received packet until it has observed
-`BITSTREAM_EXTENDED_CODE_START_OF_FRAME` at least once.
+A decoder may discard received packets until it has observed either supported sequence-header code at least once.
 
 In a video sequence, `width_minus_1`, `height_minus_1` and `chroma_resolution` must remain invariant.
 What a "video sequence" is, is not defined here, but left to relevant higher-level protocols.
