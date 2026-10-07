@@ -102,6 +102,27 @@ $ cmake .. -DCMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/$NDK_VERSION/build/cmake/and
 $ ninja install
 ```
 
+### CMake subproject
+
+The C API can also be built directly within a parent project's build graph:
+
+```cmake
+set(PYROWAVE_BUILD_SHARED OFF)
+set(PYROWAVE_BUILD_STATIC_C_API ON)
+set(PYROWAVE_BUILD_TESTS OFF)
+set(PYROWAVE_INSTALL OFF)
+set(GRANITE_INSTALL_TARGETS OFF)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+add_subdirectory(third-party/pyrowave pyrowave EXCLUDE_FROM_ALL)
+target_link_libraries(your_application PRIVATE pyrowave-c-api-static)
+```
+
+Initialize the pinned nested submodules before configuration. The static target
+provides the C API and Vulkan include paths and carries its Pyrowave/Granite
+link dependencies; no intermediate source copy or separate build script is
+required. C API tests and Pyrowave install rules default to enabled in a
+standalone build and disabled in a subproject.
+
 ### Local development and CLI
 
 For the sample and test applications in this repo, the same pinned Granite

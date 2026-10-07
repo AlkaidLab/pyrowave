@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 99)
 project(pyrowave LANGUAGES CXX C)
 
+set(PYROWAVE_IS_TOP_LEVEL OFF)
+if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(PYROWAVE_IS_TOP_LEVEL ON)
+endif()
+
 set(PYROWAVE_GRANITE_SOURCE_DIR
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Granite"
         CACHE PATH "Granite source tree used by PyroWave")
@@ -49,6 +54,8 @@ option(PYROWAVE_DEVEL "Build PyroWave as a standalone sandbox with development t
 option(PYROWAVE_UTILS "Build PyroWave with extra runtime tooling." OFF)
 option(PYROWAVE_BUILD_SHARED "Build the shared C API runtime." ON)
 option(PYROWAVE_BUILD_STATIC_C_API "Build a static C API runtime." OFF)
+option(PYROWAVE_BUILD_TESTS "Build the C API tests and device validation tool." ${PYROWAVE_IS_TOP_LEVEL})
+option(PYROWAVE_INSTALL "Add Pyrowave install rules." ${PYROWAVE_IS_TOP_LEVEL})
 
 option(PYROWAVE_FP32_STORAGE "Configure for full FP32 and extended precision." OFF)
 option(PYROWAVE_FP32_MATH "Configure for FP32 arithmetic, but reduced range storage." ON)
@@ -70,6 +77,17 @@ if (PYROWAVE_UTILS)
 else()
     set(GRANITE_FFMPEG OFF CACHE BOOL "" FORCE)
     set(GRANITE_FFMPEG_VULKAN OFF CACHE BOOL "" FORCE)
+endif()
+
+# Granite configures its static dependencies through the global cache. Do not
+# change the embedding project's library preference.
+if (DEFINED CACHE{BUILD_SHARED_LIBS})
+    set(_pyrowave_had_shared_cache ON)
+    get_property(_pyrowave_shared_cache_value CACHE BUILD_SHARED_LIBS PROPERTY VALUE)
+    get_property(_pyrowave_shared_cache_type CACHE BUILD_SHARED_LIBS PROPERTY TYPE)
+    get_property(_pyrowave_shared_cache_help CACHE BUILD_SHARED_LIBS PROPERTY HELPSTRING)
+else()
+    set(_pyrowave_had_shared_cache OFF)
 endif()
 
 if (PYROWAVE_DEVEL)
@@ -111,7 +129,7 @@ if (PYROWAVE_DEVEL)
     if (NOT ANDROID)
         target_compile_definitions(pyrowave-viewer PRIVATE ASSET_DIRECTORY=\"${CMAKE_CURRENT_SOURCE_DIR}/shaders\")
     endif()
-elseif (${PROJECT_IS_TOP_LEVEL} AND (NOT TARGET granite-vulkan))
+elseif (NOT TARGET granite-vulkan)
     set(GRANITE_VULKAN_SHADER_MANAGER_RUNTIME_COMPILER OFF CACHE BOOL "" FORCE)
     set(GRANITE_SHADER_COMPILER_OPTIMIZE OFF CACHE BOOL "" FORCE)
     set(GRANITE_POSITION_INDEPENDENT ON CACHE BOOL "" FORCE)
@@ -134,12 +152,24 @@ elseif (${PROJECT_IS_TOP_LEVEL} AND (NOT TARGET granite-vulkan))
             "${CMAKE_CURRENT_BINARY_DIR}/Granite" EXCLUDE_FROM_ALL)
 endif()
 
+if (_pyrowave_had_shared_cache)
+    set(BUILD_SHARED_LIBS "${_pyrowave_shared_cache_value}" CACHE
+            ${_pyrowave_shared_cache_type} "${_pyrowave_shared_cache_help}" FORCE)
+else()
+    unset(BUILD_SHARED_LIBS CACHE)
+endif()
+
 target_link_libraries(pyrowave PRIVATE granite-vulkan granite-math)
 
-if (${PROJECT_IS_TOP_LEVEL})
-    if (NOT PYROWAVE_BUILD_SHARED AND NOT PYROWAVE_BUILD_STATIC_C_API)
-        message(FATAL_ERROR "At least one Pyrowave C API runtime must be enabled")
-    endif()
+if (PYROWAVE_IS_TOP_LEVEL AND NOT PYROWAVE_BUILD_SHARED AND NOT PYROWAVE_BUILD_STATIC_C_API)
+    message(FATAL_ERROR "At least one Pyrowave C API runtime must be enabled")
+endif()
+
+if (PYROWAVE_BUILD_TESTS AND NOT PYROWAVE_BUILD_SHARED AND NOT PYROWAVE_BUILD_STATIC_C_API)
+    message(FATAL_ERROR "Pyrowave C API tests require a C API runtime")
+endif()
+
+if (PYROWAVE_BUILD_SHARED OR PYROWAVE_BUILD_STATIC_C_API)
 
     set(PYROWAVE_C_API_SOURCES
             pyrowave_c.cpp pyrowave.h
@@ -161,7 +191,10 @@ if (${PROJECT_IS_TOP_LEVEL})
         target_compile_options(pyrowave-c-api-static PRIVATE ${PYROWAVE_CXX_FLAGS})
         target_include_directories(pyrowave-c-api-static PRIVATE
                 shaders "${PYROWAVE_GRANITE_SOURCE_DIR}/video")
+        target_include_directories(pyrowave-c-api-static PUBLIC
+                "${CMAKE_CURRENT_SOURCE_DIR}")
         target_link_libraries(pyrowave-c-api-static PRIVATE pyrowave granite-vulkan granite-math)
+        target_link_libraries(pyrowave-c-api-static PUBLIC granite-volk-headers)
     endif()
 
     if (PYROWAVE_BUILD_STATIC_C_API AND NOT PYROWAVE_BUILD_SHARED)
@@ -170,17 +203,19 @@ if (${PROJECT_IS_TOP_LEVEL})
         set(PYROWAVE_C_API_TARGET pyrowave-shared)
     endif()
 
-    add_executable(pyrowave-c-test pyrowave_c_test.cpp)
-    target_link_libraries(pyrowave-c-test PRIVATE ${PYROWAVE_C_API_TARGET} granite-volk-headers)
-    target_compile_options(pyrowave-c-test PRIVATE ${PYROWAVE_CXX_FLAGS})
+    if (PYROWAVE_BUILD_TESTS)
+        add_executable(pyrowave-c-test pyrowave_c_test.cpp)
+        target_link_libraries(pyrowave-c-test PRIVATE ${PYROWAVE_C_API_TARGET} granite-volk-headers)
+        target_compile_options(pyrowave-c-test PRIVATE ${PYROWAVE_CXX_FLAGS})
 
-    add_executable(pyrowave-c-interop-test pyrowave_c_interop_test.cpp com_ptr.hpp)
-    target_link_libraries(pyrowave-c-interop-test PRIVATE ${PYROWAVE_C_API_TARGET} granite-vulkan)
-    target_compile_options(pyrowave-c-interop-test PRIVATE ${PYROWAVE_CXX_FLAGS})
+        add_executable(pyrowave-c-interop-test pyrowave_c_interop_test.cpp com_ptr.hpp)
+        target_link_libraries(pyrowave-c-interop-test PRIVATE ${PYROWAVE_C_API_TARGET} granite-vulkan)
+        target_compile_options(pyrowave-c-interop-test PRIVATE ${PYROWAVE_CXX_FLAGS})
 
-    add_executable(pyrowave-device-validation pyrowave_device_validation.cpp com_ptr.hpp)
-    target_link_libraries(pyrowave-device-validation PRIVATE ${PYROWAVE_C_API_TARGET} granite-util granite-volk-headers)
-    target_compile_options(pyrowave-device-validation PRIVATE ${PYROWAVE_CXX_FLAGS})
+        add_executable(pyrowave-device-validation pyrowave_device_validation.cpp com_ptr.hpp)
+        target_link_libraries(pyrowave-device-validation PRIVATE ${PYROWAVE_C_API_TARGET} granite-util granite-volk-headers)
+        target_compile_options(pyrowave-device-validation PRIVATE ${PYROWAVE_CXX_FLAGS})
+    endif()
 
     set(PYROWAVE_API_VERSION_MAJOR 0)
     set(PYROWAVE_API_VERSION_MINOR 6)
@@ -188,7 +223,7 @@ if (${PROJECT_IS_TOP_LEVEL})
     set(PYROWAVE_API_VERSION ${PYROWAVE_API_VERSION_MAJOR}.${PYROWAVE_API_VERSION_MINOR}.${PYROWAVE_API_VERSION_PATCH})
 
     # DLL_NAME_WITH_SOVERSION requires CMake 3.27+. SteamRT doesn't have CMake 3.27 yet though.
-    if (WIN32 AND (CMAKE_VERSION VERSION_LESS "3.27"))
+    if (WIN32 AND PYROWAVE_BUILD_SHARED AND (CMAKE_VERSION VERSION_LESS "3.27"))
         message(FATAL_ERROR "CMake build on Windows expects version 3.27 at minimum.")
     endif()
 
@@ -199,11 +234,11 @@ if (${PROJECT_IS_TOP_LEVEL})
                 DLL_NAME_WITH_SOVERSION ON)
     endif()
 
-    if (PYROWAVE_BUILD_SHARED OR PYROWAVE_BUILD_STATIC_C_API)
+    if (PYROWAVE_INSTALL)
         install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pyrowave.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pyrowave)
     endif()
 
-    if (PYROWAVE_BUILD_SHARED)
+    if (PYROWAVE_INSTALL AND PYROWAVE_BUILD_SHARED)
         install(TARGETS pyrowave-shared EXPORT pyrowave-sharedConfig
                 RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
                 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -211,13 +246,15 @@ if (${PROJECT_IS_TOP_LEVEL})
                 PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pyrowave)
         install(EXPORT pyrowave-sharedConfig DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pyrowave-shared/cmake)
     endif()
-    if (PYROWAVE_BUILD_STATIC_C_API)
+    if (PYROWAVE_INSTALL AND PYROWAVE_BUILD_STATIC_C_API)
         install(TARGETS pyrowave-c-api-static
                 ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
                 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
                 RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
-    install(TARGETS pyrowave-device-validation RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if (PYROWAVE_INSTALL AND PYROWAVE_BUILD_TESTS)
+        install(TARGETS pyrowave-device-validation RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
 
     # Evaluator app
     if (PYROWAVE_UTILS)
@@ -226,17 +263,19 @@ if (${PROJECT_IS_TOP_LEVEL})
         if (PYROWAVE_DEVEL AND (NOT ANDROID))
             target_compile_definitions(pyrowave-evaluator PRIVATE ASSET_DIRECTORY=\"${CMAKE_CURRENT_SOURCE_DIR}/shaders\")
         endif()
-        install(TARGETS pyrowave-evaluator RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-        install(DIRECTORY assets DESTINATION ${CMAKE_INSTALL_BINDIR})
-        install(DIRECTORY "${PYROWAVE_GRANITE_SOURCE_DIR}/assets/fonts"
-                DESTINATION ${CMAKE_INSTALL_BINDIR}/builtin/assets)
+        if (PYROWAVE_INSTALL)
+            install(TARGETS pyrowave-evaluator RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+            install(DIRECTORY assets DESTINATION ${CMAKE_INSTALL_BINDIR})
+            install(DIRECTORY "${PYROWAVE_GRANITE_SOURCE_DIR}/assets/fonts"
+                    DESTINATION ${CMAKE_INSTALL_BINDIR}/builtin/assets)
+        endif()
 
         add_granite_offline_tool(pyrowave-psnr-hvs-m psnr.cpp)
         target_link_libraries(pyrowave-psnr-hvs-m PRIVATE granite-vulkan pyrowave-utils pyrowave granite-video)
         target_compile_definitions(pyrowave-psnr-hvs-m PRIVATE ASSET_DIRECTORY=\"${CMAKE_CURRENT_SOURCE_DIR}/shaders\")
     endif()
 
-    if (PYROWAVE_BUILD_SHARED)
+    if (PYROWAVE_INSTALL AND PYROWAVE_BUILD_SHARED)
         set(PYROWAVE_INSTALL_LIB_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
         set(PYROWAVE_INSTALL_INC_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/pyrowave)
         configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pkg-config/pyrowave-shared.pc.in
@@ -251,9 +290,11 @@ if (${PROJECT_IS_TOP_LEVEL})
         if (PYROWAVE_BUILD_STATIC_C_API)
             target_link_libraries(pyrowave-c-api-static PRIVATE -static gcc stdc++ winpthread)
         endif()
-        target_link_libraries(pyrowave-c-test PRIVATE -static gcc stdc++ winpthread)
-        target_link_libraries(pyrowave-c-interop-test PRIVATE -static gcc stdc++ winpthread)
-        target_link_libraries(pyrowave-device-validation PRIVATE -static gcc stdc++ winpthread)
+        if (PYROWAVE_BUILD_TESTS)
+            target_link_libraries(pyrowave-c-test PRIVATE -static gcc stdc++ winpthread)
+            target_link_libraries(pyrowave-c-interop-test PRIVATE -static gcc stdc++ winpthread)
+            target_link_libraries(pyrowave-device-validation PRIVATE -static gcc stdc++ winpthread)
+        endif()
     endif()
 
     if (NOT WIN32)
@@ -263,9 +304,11 @@ if (${PROJECT_IS_TOP_LEVEL})
         if (PYROWAVE_BUILD_STATIC_C_API)
             target_link_libraries(pyrowave-c-api-static PRIVATE -pthread)
         endif()
-        target_link_libraries(pyrowave-c-test PRIVATE -pthread)
-        target_link_libraries(pyrowave-c-interop-test PRIVATE -pthread)
-        target_link_libraries(pyrowave-device-validation PRIVATE -pthread)
+        if (PYROWAVE_BUILD_TESTS)
+            target_link_libraries(pyrowave-c-test PRIVATE -pthread)
+            target_link_libraries(pyrowave-c-interop-test PRIVATE -pthread)
+            target_link_libraries(pyrowave-device-validation PRIVATE -pthread)
+        endif()
     endif()
 
     if (WIN32)
@@ -273,7 +316,9 @@ if (${PROJECT_IS_TOP_LEVEL})
             target_sources(pyrowave-shared PRIVATE pyrowave-shared.def)
             set_target_properties(pyrowave-shared PROPERTIES PREFIX "lib")
         endif()
-        target_link_libraries(pyrowave-c-interop-test PRIVATE d3d11 d3d12 dxgi)
+        if (PYROWAVE_BUILD_TESTS)
+            target_link_libraries(pyrowave-c-interop-test PRIVATE d3d11 d3d12 dxgi)
+        endif()
     elseif (NOT APPLE)
         if (PYROWAVE_BUILD_SHARED)
             target_link_options(pyrowave-shared PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/link.T)
