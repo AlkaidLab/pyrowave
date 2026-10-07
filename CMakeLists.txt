@@ -56,7 +56,7 @@ option(PYROWAVE_UTILS "Build PyroWave with extra runtime tooling." OFF)
 option(PYROWAVE_BUILD_SHARED "Build the shared C API runtime." ON)
 option(PYROWAVE_BUILD_STATIC_C_API "Build a static C API runtime." OFF)
 option(PYROWAVE_BUILD_TESTS "Build the C API tests and device validation tool." ${PYROWAVE_IS_TOP_LEVEL})
-option(PYROWAVE_INSTALL "Add Pyrowave install rules." ${PYROWAVE_IS_TOP_LEVEL})
+option(PYROWAVE_INSTALL "Add PyroWave install rules." ${PYROWAVE_IS_TOP_LEVEL})
 
 option(PYROWAVE_FP32_STORAGE "Configure for full FP32 and extended precision." OFF)
 option(PYROWAVE_FP32_MATH "Configure for FP32 arithmetic, but reduced range storage." ON)
@@ -163,11 +163,11 @@ endif()
 target_link_libraries(pyrowave PRIVATE granite-vulkan granite-math)
 
 if (PYROWAVE_IS_TOP_LEVEL AND NOT PYROWAVE_BUILD_SHARED AND NOT PYROWAVE_BUILD_STATIC_C_API)
-    message(FATAL_ERROR "At least one Pyrowave C API runtime must be enabled")
+    message(FATAL_ERROR "At least one PyroWave C API runtime must be enabled")
 endif()
 
 if (PYROWAVE_BUILD_TESTS AND NOT PYROWAVE_BUILD_SHARED AND NOT PYROWAVE_BUILD_STATIC_C_API)
-    message(FATAL_ERROR "Pyrowave C API tests require a C API runtime")
+    message(FATAL_ERROR "PyroWave C API tests require a C API runtime")
 endif()
 
 if (PYROWAVE_BUILD_SHARED OR PYROWAVE_BUILD_STATIC_C_API)

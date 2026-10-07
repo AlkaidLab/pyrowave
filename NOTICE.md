@@ -1,9 +1,9 @@
 # License scope
 
-This fork contains both upstream Pyrowave code and changes maintained by
+This fork contains both upstream PyroWave code and changes maintained by
 AlkaidLab.
 
-- Original Pyrowave code by Hans-Kristian Arntzen remains available under the
+- Original PyroWave code by Hans-Kristian Arntzen remains available under the
   MIT License. The original notice is preserved in `LICENSES/MIT.txt`.
 - Changes made in this fork are licensed under the GNU General Public License,
   version 3, only (GPL-3.0-only).

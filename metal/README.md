@@ -1,5 +1,5 @@
 
-This is an AI assisted port of Pyrowave to Metal on Apple platforms.
+This is an AI assisted port of PyroWave to Metal on Apple platforms.
 
 This has no Granite code, using native Metal and converting the shaders to MSL.
 

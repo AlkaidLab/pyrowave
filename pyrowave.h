@@ -310,7 +310,7 @@ typedef struct pyrowave_image_view
 	VkComponentSwizzle swizzle;
 	// Must be VK_IMAGE_LAYOUT_(SHADER_)READ_ONLY_OPTIMAL (encode only) or VK_IMAGE_LAYOUT_GENERAL.
 	// For fragment decode path, must be (COLOR_)ATTACHMENT_OPTIMAL or VK_IMAGE_LAYOUT_GENERAL.
-	// Pyrowave will not perform any image layout transitions on its own in the GPU buffer paths.
+	// PyroWave will not perform any image layout transitions on its own in the GPU buffer paths.
 	VkImageLayout layout;
 } pyrowave_image_view;
 
@@ -553,7 +553,7 @@ typedef struct pyrowave_scaled_encode_info
 	VkFormat intermediate_plane_format;
 
 	// In YCbCr, the center point for chroma may depend on bit depth in some cases.
-	// Since Pyrowave is a floating point codec, this is mostly irrelevant for us,
+	// Since PyroWave is a floating point codec, this is mostly irrelevant for us,
 	// but provided here for compatibility. Consumer of the final image is expected
 	// to know which encoding for pure gray was used.
 	// Common values would be 0.5 (bit-depth agnostic default),
