@@ -87,6 +87,18 @@ That test also serves as a basic user guide for the API.
 
 `build-steamrt.sh` builds against the Sniper SDK and is also supported.
 
+#### Installed static C API
+
+Configure with `-DPYROWAVE_BUILD_SHARED=OFF -DPYROWAVE_BUILD_STATIC_C_API=ON`.
+The installed static archive includes the Pyrowave and Granite dependency
+objects. Its CMake package supplies the C API/Vulkan headers and system link
+requirements, without referring to the original source or build directories:
+
+```cmake
+find_package(pyrowave-static CONFIG REQUIRED)
+target_link_libraries(your_application PRIVATE Pyrowave::pyrowave-c-api-static)
+```
+
 #### Android standalone build
 
 This assumes that NDK is installed somewhere.

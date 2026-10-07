@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 99)
 project(pyrowave LANGUAGES CXX C)
+include(GNUInstallDirs)
 
 set(PYROWAVE_IS_TOP_LEVEL OFF)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -192,7 +193,8 @@ if (PYROWAVE_BUILD_SHARED OR PYROWAVE_BUILD_STATIC_C_API)
         target_include_directories(pyrowave-c-api-static PRIVATE
                 shaders "${PYROWAVE_GRANITE_SOURCE_DIR}/video")
         target_include_directories(pyrowave-c-api-static PUBLIC
-                "${CMAKE_CURRENT_SOURCE_DIR}")
+                "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+                "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/pyrowave>")
         target_link_libraries(pyrowave-c-api-static PRIVATE pyrowave granite-vulkan granite-math)
         target_link_libraries(pyrowave-c-api-static PUBLIC granite-volk-headers)
     endif()
@@ -247,10 +249,8 @@ if (PYROWAVE_BUILD_SHARED OR PYROWAVE_BUILD_STATIC_C_API)
         install(EXPORT pyrowave-sharedConfig DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pyrowave-shared/cmake)
     endif()
     if (PYROWAVE_INSTALL AND PYROWAVE_BUILD_STATIC_C_API)
-        install(TARGETS pyrowave-c-api-static
-                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        include(cmake/InstallStaticCAPI.cmake)
+        pyrowave_install_static_c_api()
     endif()
     if (PYROWAVE_INSTALL AND PYROWAVE_BUILD_TESTS)
         install(TARGETS pyrowave-device-validation RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
