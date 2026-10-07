@@ -90,7 +90,7 @@ That test also serves as a basic user guide for the API.
 #### Installed static C API
 
 Configure with `-DPYROWAVE_BUILD_SHARED=OFF -DPYROWAVE_BUILD_STATIC_C_API=ON`.
-The installed static archive includes the Pyrowave and Granite dependency
+The installed static archive includes the PyroWave and Granite dependency
 objects. Its CMake package supplies the C API/Vulkan headers and system link
 requirements, without referring to the original source or build directories:
 
@@ -130,9 +130,9 @@ target_link_libraries(your_application PRIVATE pyrowave-c-api-static)
 ```
 
 Initialize the pinned nested submodules before configuration. The static target
-provides the C API and Vulkan include paths and carries its Pyrowave/Granite
+provides the C API and Vulkan include paths and carries its PyroWave/Granite
 link dependencies; no intermediate source copy or separate build script is
-required. C API tests and Pyrowave install rules default to enabled in a
+required. C API tests and PyroWave install rules default to enabled in a
 standalone build and disabled in a subproject.
 
 ### Local development and CLI

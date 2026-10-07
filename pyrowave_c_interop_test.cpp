@@ -999,7 +999,7 @@ static void test_opaque_interop(bool win32_kmt)
 	                              imported_timeline, 3,
 	                              encoder);
 
-	// Pyrowave (or rather, Granite) API destroys objects in a deferred way.
+	// PyroWave (or rather, Granite) API destroys objects in a deferred way.
 	pyrowave_sync_object_destroy(imported_binary);
 
 	pyrowave_decoder_create_info decoder_info = {};
