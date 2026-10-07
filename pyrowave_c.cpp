@@ -1846,6 +1846,7 @@ pyrowave_decoder_decode_cpu_buffer_synchronous(pyrowave_decoder decoder, const p
 	if (decoder->chroma == ChromaSubsampling::Chroma444 && buffers->format != PYROWAVE_CPU_BUFFER_FORMAT_YUV444P)
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
+	const size_t plane_bpp = decoder->high_precision ? 2 : 1;
 	for (int plane = 0; plane < 3; plane++)
 	{
 		int plane_width = decoder->width;
@@ -1860,11 +1861,11 @@ pyrowave_decoder_decode_cpu_buffer_synchronous(pyrowave_decoder decoder, const p
 		// R16_UNORM readback uses two bytes per sample. The public stride and
 		// plane-size fields are byte counts, so validate the caller's buffers
 		// against the actual image format before submitting the copy.
-		const size_t plane_bpp = decoder->high_precision ? 2 : 1;
-
-		if (buffers->row_stride_in_bytes[plane] < plane_width * plane_bpp)
+		if (buffers->row_stride_in_bytes[plane] % plane_bpp != 0 ||
+		    buffers->row_stride_in_bytes[plane] < plane_width * plane_bpp ||
+		    buffers->row_stride_in_bytes[plane] / plane_bpp > UINT32_MAX)
 			return PYROWAVE_ERROR_INVALID_ARGUMENT;
-		if (buffers->row_stride_in_bytes[plane] * plane_height > buffers->plane_size_in_bytes[plane])
+		if (buffers->row_stride_in_bytes[plane] > buffers->plane_size_in_bytes[plane] / plane_height)
 			return PYROWAVE_ERROR_INVALID_ARGUMENT;
 	}
 
@@ -1966,7 +1967,7 @@ pyrowave_decoder_decode_cpu_buffer_synchronous(pyrowave_decoder decoder, const p
 
 		cmd->copy_image_to_buffer(*readback_buffers[plane], *decoder->planes[plane], 0, {},
 		                          {decoder->planes[plane]->get_width(), decoder->planes[plane]->get_height(), 1},
-		                          buffers->row_stride_in_bytes[plane], 0,
+		                          unsigned(buffers->row_stride_in_bytes[plane] / plane_bpp), 0,
 		                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1});
 	}
 

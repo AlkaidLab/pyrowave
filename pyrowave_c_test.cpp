@@ -174,6 +174,66 @@ static void test_decode_cpu_buffer_validation(bool fragment_path)
 	pyrowave_device_destroy(info.device);
 }
 
+static void test_high_precision_cpu_buffer_readback(bool fragment_path)
+{
+	pyrowave_decoder_create_info info = {};
+	info.width = 16;
+	info.height = 16;
+	info.fragment_path = fragment_path;
+	info.output_bit_depth = 10;
+	pyrowave_decoder decoder;
+	CHECKED(pyrowave_create_default_device(&info.device));
+	CHECKED(pyrowave_decoder_create(&info, &decoder));
+
+	for (bool padded : {false, true})
+	{
+		pyrowave_cpu_buffer buffer = {};
+		buffer.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV420P;
+		buffer.width = info.width;
+		buffer.height = info.height;
+		std::vector<uint16_t> planes[3];
+		for (int plane = 0; plane < 3; plane++)
+		{
+			const size_t width = plane == 0 ? 16 : 8;
+			const size_t height = plane == 0 ? 16 : 8;
+			buffer.row_stride_in_bytes[plane] = (width + (padded ? 2 : 0)) * sizeof(uint16_t);
+			buffer.plane_size_in_bytes[plane] = buffer.row_stride_in_bytes[plane] * height;
+			planes[plane].assign(buffer.plane_size_in_bytes[plane] / sizeof(uint16_t) + 8, 0xa55a);
+			buffer.data[plane] = planes[plane].data();
+		}
+		for (int plane = 0; plane < 3; plane++)
+		{
+			const size_t height = plane == 0 ? 16 : 8;
+			auto invalid = buffer;
+			invalid.row_stride_in_bytes[plane]++;
+			invalid.plane_size_in_bytes[plane] = invalid.row_stride_in_bytes[plane] * height;
+			ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &invalid) ==
+			            PYROWAVE_ERROR_INVALID_ARGUMENT);
+			invalid.row_stride_in_bytes[plane] = SIZE_MAX - 1;
+			invalid.plane_size_in_bytes[plane] = SIZE_MAX;
+			ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &invalid) ==
+			            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		}
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &buffer));
+		for (int plane = 0; plane < 3; plane++)
+		{
+			const size_t width = plane == 0 ? 16 : 8;
+			const size_t height = plane == 0 ? 16 : 8;
+			const size_t pitch = buffer.row_stride_in_bytes[plane] / sizeof(uint16_t);
+			for (size_t y = 0; y < height; y++)
+				for (size_t x = 0; x < width; x++)
+					ASSERT_THAT(planes[plane][y * pitch + x] == 0x7fff ||
+					            planes[plane][y * pitch + x] == 0x8000);
+			for (size_t index = buffer.plane_size_in_bytes[plane] / sizeof(uint16_t);
+			     index < planes[plane].size(); index++)
+				ASSERT_THAT(planes[plane][index] == 0xa55a);
+		}
+	}
+
+	pyrowave_decoder_destroy(decoder);
+	pyrowave_device_destroy(info.device);
+}
+
 static void test_encode_cpu_buffer_validation(bool nv12)
 {
 	pyrowave_encoder_create_info info = {};
@@ -750,6 +810,8 @@ int main()
 	printf("Running error handling tests ...\n");
 	test_decode_cpu_buffer_validation(false);
 	test_decode_cpu_buffer_validation(true);
+	test_high_precision_cpu_buffer_readback(false);
+	test_high_precision_cpu_buffer_readback(true);
 	test_encode_cpu_buffer_validation(false);
 	test_encode_cpu_buffer_validation(true);
 	test_encoder_create_validation();
