@@ -329,15 +329,19 @@ static bool pyrowave_device_confirm_external_semaphore_support(pyrowave_device d
 	sem_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
 #endif
 
+	// Capability queries are advisory: some drivers under-report working imports.
+	// The caller still has to create/import and verify the sync object it uses.
 	type_info.semaphoreType = VK_SEMAPHORE_TYPE_BINARY;
 	vkGetPhysicalDeviceExternalSemaphoreProperties(device->device.get_physical_device(), &sem_info, &sem_props);
 	if (!(sem_props.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT))
-		return false;
+		LOGW("External binary semaphore handle type #%x reports features #%x; actual import will decide.\n",
+		     unsigned(sem_info.handleType), sem_props.externalSemaphoreFeatures);
 
 	type_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
 	vkGetPhysicalDeviceExternalSemaphoreProperties(device->device.get_physical_device(), &sem_info, &sem_props);
 	if (!(sem_props.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT))
-		return false;
+		LOGW("External timeline semaphore handle type #%x reports features #%x; actual import will decide.\n",
+		     unsigned(sem_info.handleType), sem_props.externalSemaphoreFeatures);
 
 #ifdef _WIN32
 	// Despite being a timeline, D3D12_FENCE was added before TIMELINE was added, and AMD drivers have
@@ -346,7 +350,8 @@ static bool pyrowave_device_confirm_external_semaphore_support(pyrowave_device d
 	sem_info.pNext = nullptr;
 	vkGetPhysicalDeviceExternalSemaphoreProperties(device->device.get_physical_device(), &sem_info, &sem_props);
 	if (!(sem_props.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT))
-		return false;
+		LOGW("D3D fence semaphore reports features #%x; actual import will decide.\n",
+		     sem_props.externalSemaphoreFeatures);
 #endif
 
 	return true;
@@ -365,13 +370,11 @@ static bool pyrowave_device_confirm_external_memory_support(pyrowave_device devi
 		return false;
 #endif
 
+	// The Windows path requires D3D11 texture import, not every external handle
+	// type exposed by the API. Other types are checked when actually requested.
 	static const VkExternalMemoryHandleTypeFlagBits required_external_types[] = {
 #ifdef _WIN32
 		VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT,
 #else
 		VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
 		VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
@@ -407,7 +410,11 @@ static bool pyrowave_device_confirm_external_memory_support(pyrowave_device devi
 		if (!device->device.get_image_format_properties(
 			VK_FORMAT_R8_UNORM, VK_IMAGE_TYPE_2D, type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT ?
 			VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT : VK_IMAGE_TILING_OPTIMAL,
+#ifdef _WIN32
+			VK_IMAGE_USAGE_SAMPLED_BIT,
+#else
 			VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+#endif
 			0, &external_format_info, &props2))
 			return false;
 
@@ -935,11 +942,13 @@ pyrowave_encoder_set_color_metadata(pyrowave_encoder encoder,
 	if (!encoder || !metadata || !valid_color_metadata(*metadata))
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
+	// BitstreamColorMetadata stores plain uint32_t values; casting the C enums back to their own
+	// enum type narrows on MSVC (C2397) inside a braced-init-list.
 	encoder->encoder.set_color_metadata({
-		static_cast<pyrowave_color_primaries>(metadata->primaries),
-		static_cast<pyrowave_transfer_function>(metadata->transfer),
-		static_cast<pyrowave_ycbcr_transform>(metadata->transform),
-		static_cast<pyrowave_ycbcr_range>(metadata->range),
+		static_cast<uint32_t>(metadata->primaries),
+		static_cast<uint32_t>(metadata->transfer),
+		static_cast<uint32_t>(metadata->transform),
+		static_cast<uint32_t>(metadata->range),
 		metadata->chroma_siting,
 	});
 	encoder->color_metadata = *metadata;

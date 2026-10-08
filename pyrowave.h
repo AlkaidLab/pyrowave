@@ -207,6 +207,8 @@ pyrowave_device_set_command_buffer(pyrowave_device device, VkCommandBuffer cmd);
 PYROWAVE_PUBLIC_API pyrowave_result
 pyrowave_device_set_queue_type(pyrowave_device device, VkQueueFlagBits queue_flags);
 
+// Coarse external-resource prerequisites, not proof that a particular handle works.
+// Callers must create/import their actual resources and verify synchronization.
 PYROWAVE_PUBLIC_API bool
 pyrowave_device_confirm_interop_support(pyrowave_device device);
 
