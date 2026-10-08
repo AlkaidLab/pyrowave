@@ -1,3 +1,4 @@
 [submodule "third_party/Granite"]
 	path = third_party/Granite
-	url = https://github.com/Themaister/Granite.git
+	url = https://github.com/AlkaidLab/Granite.git
+	branch = master
