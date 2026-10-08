@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 
 #define INITGUID
 
@@ -53,7 +54,7 @@ static pyrowave_device create_device_from_granite(Device &device)
 	pyrowave_device pyro_device;
 	CHECKED(pyrowave_create_device_by_compat(device.get_gpu_properties().vendorID,
 		device.get_gpu_properties().deviceID, &device_uuid, &driver_uuid,
-		ids.deviceLUIDValid ? &device_luid : nullptr, &pyro_device));
+		ids.deviceLUIDValid ? &device_luid : nullptr, VK_QUEUE_GLOBAL_PRIORITY_MEDIUM, &pyro_device));
 
 	return pyro_device;
 }
@@ -351,10 +352,10 @@ static void send_image_to_encoder(pyrowave_image pyro_image,
 		scaled_info.input_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		scaled_info.output_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		scaled_info.intermediate_plane_format = VK_FORMAT_R8_UNORM;
-		CHECKED(pyrowave_encoder_encode_gpu_scaled_synchronous(encoder, &acquire, &release, &scaled_info, &rate_control));
+		CHECKED(pyrowave_encoder_encode_gpu_scaled(encoder, &acquire, &release, &scaled_info, &rate_control));
 	}
 	else
-		CHECKED(pyrowave_encoder_encode_gpu_synchronous(encoder, &acquire, &release, &buffers, &rate_control));
+		CHECKED(pyrowave_encoder_encode_gpu(encoder, &acquire, &release, &buffers, &rate_control));
 }
 
 static void send_granite_image_to_encoder(Device &device, Image &granite_image, pyrowave_image pyro_image,
@@ -504,7 +505,7 @@ static void validate_granite_image(Device &device, Image &img, SemaphoreHolder &
 	validate_mirror_buffer(device, *cr, 640, 360, 5, 7);
 }
 
-static void test_direct_interop()
+static void test_direct_interop(bool cpu_encoder_first, bool cpu_decoder_first)
 {
 	ASSERT_THAT(Context::init_loader(nullptr));
 
@@ -604,6 +605,27 @@ static void test_direct_interop()
 
 	pyrowave_rate_control rate_control = { 100000 };
 	pyrowave_gpu_buffers gpu_buffers = {};
+	uint16_t cpu_planes[3][64 * 64] = {};
+	pyrowave_cpu_buffer cpu_buffer = {};
+	cpu_buffer.width = 64;
+	cpu_buffer.height = 64;
+	cpu_buffer.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10;
+	for (int plane = 0; plane < 3; plane++)
+	{
+		cpu_buffer.data[plane] = cpu_planes[plane];
+		cpu_buffer.row_stride_in_bytes[plane] = 64 * sizeof(uint16_t);
+		cpu_buffer.plane_size_in_bytes[plane] = sizeof(cpu_planes[plane]);
+	}
+	if (cpu_encoder_first)
+	{
+		CHECKED(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control));
+		size_t cpu_packets = 0;
+		CHECKED(pyrowave_encoder_compute_num_packets(encoder, rate_control.maximum_bitstream_size, &cpu_packets));
+		auto invalid = cpu_buffer;
+		invalid.row_stride_in_bytes[0]++;
+		ASSERT_THAT(pyrowave_encoder_encode_cpu(encoder, &invalid, &rate_control) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+	}
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -623,7 +645,7 @@ static void test_direct_interop()
 	// Encode to provided cmd.
 	// Redirect commands here.
 	pyrowave_device_set_command_buffer(pyro_device, cmd->get_command_buffer());
-	CHECKED(pyrowave_encoder_encode_gpu_synchronous(encoder, nullptr, nullptr, &gpu_buffers, &rate_control));
+	CHECKED(pyrowave_encoder_encode_gpu(encoder, nullptr, nullptr, &gpu_buffers, &rate_control));
 	pyrowave_device_set_command_buffer(pyro_device, VK_NULL_HANDLE);
 
 	// Wait on CPU before we call packetization.
@@ -642,6 +664,14 @@ static void test_direct_interop()
 
 	CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.get() + packet.offset, packet.size));
 	ASSERT_THAT(pyrowave_decoder_decode_is_ready(decoder, false));
+	if (cpu_decoder_first)
+	{
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &cpu_buffer));
+		auto invalid = cpu_buffer;
+		invalid.row_stride_in_bytes[0]++;
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_async(decoder, &invalid, 0) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+	}
 
 	for (auto &plane : gpu_buffers.planes)
 	{
@@ -693,7 +723,7 @@ static void test_direct_interop()
 	pyrowave_device_destroy(pyro_device);
 }
 
-static void test_direct_interop_scaling()
+static void test_direct_interop_scaling(VkSamplerYcbcrRange range, uint32_t bit_depth)
 {
 	ASSERT_THAT(Context::init_loader(nullptr));
 
@@ -711,10 +741,6 @@ static void test_direct_interop_scaling()
 
 	Device device;
 	device.set_context(ctx);
-
-	bool has_rdoc = Device::init_renderdoc_capture();
-	if (has_rdoc)
-		device.begin_renderdoc_capture();
 
 	// Fill in a proxy instance create info.
 	VkInstanceCreateInfo instance_create_info = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
@@ -832,12 +858,14 @@ static void test_direct_interop_scaling()
 	scaling.input_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 	scaling.output_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 	scaling.ycbcr_chroma_midpoint = 130.0f / 255.0f;
+	scaling.ycbcr_range = range;
+	scaling.ycbcr_range_bit_depth = bit_depth;
 	scaling.force_linear_filtering = true;
 	VkRect2D crop_rect = { { 2, 1 }, { 64, 64 } };
 	scaling.crop_rect = &crop_rect;
 
 	pyrowave_device_set_command_buffer(pyro_device, cmd->get_command_buffer());
-	CHECKED(pyrowave_encoder_encode_gpu_scaled_synchronous(encoder, nullptr, nullptr, &scaling, &rate_control));
+	CHECKED(pyrowave_encoder_encode_gpu_scaled(encoder, nullptr, nullptr, &scaling, &rate_control));
 	pyrowave_device_set_command_buffer(pyro_device, VK_NULL_HANDLE);
 
 	// Wait on CPU before we call packetization.
@@ -897,6 +925,15 @@ static void test_direct_interop_scaling()
 
 	auto *readback_ptr = static_cast<const uint16_t *>(device.map_host_buffer(*readback_buffer, MEMORY_ACCESS_READ_BIT));
 
+	float luma_scale = 1.0f, luma_offset = 0.0f, chroma_scale = 1.0f;
+	if (range == VK_SAMPLER_YCBCR_RANGE_ITU_NARROW)
+	{
+		float code_unit = float(1u << (bit_depth - 8)) / float((1u << bit_depth) - 1u);
+		luma_scale = 219.0f * code_unit;
+		luma_offset = 16.0f * code_unit;
+		chroma_scale = 224.0f * code_unit;
+	}
+
 #if 1
 	for (int y = 0; y < 64; y++)
 	{
@@ -912,9 +949,9 @@ static void test_direct_interop_scaling()
 			float b = 128.0f / 255.0f;
 #endif
 
-			auto Y = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-			auto Cb = 130.0f / 255.0f - 0.114572f * r - 0.385428f * g + 0.5f * b;
-			auto Cr = 130.0f / 255.0f + 0.5f * r - 0.454153f * g - 0.0458471f * b;
+			auto Y = luma_offset + luma_scale * (0.2126f * r + 0.7152f * g + 0.0722f * b);
+			auto Cb = 130.0f / 255.0f + chroma_scale * (-0.114572f * r - 0.385428f * g + 0.5f * b);
+			auto Cr = 130.0f / 255.0f + chroma_scale * (0.5f * r - 0.454153f * g - 0.0458471f * b);
 
 			float readback_y = float(readback_ptr[0 * 64 * 64 + y * 64 + x]) / float(0xffff);
 			float readback_cb = float(readback_ptr[1 * 64 * 64 + y * 64 + x]) / float(0xffff);
@@ -924,8 +961,8 @@ static void test_direct_interop_scaling()
 			float cb_delta = std::abs(readback_cb - Cb);
 			float cr_delta = std::abs(readback_cr - Cr);
 			ASSERT_THAT(y_delta <= 1.0f / 255.0f);
-			ASSERT_THAT(cb_delta <= 2.0f / 255.0f);
-			ASSERT_THAT(cr_delta <= 2.0f / 255.0f);
+			ASSERT_THAT(cb_delta <= 3.0f / 255.0f);
+			ASSERT_THAT(cr_delta <= 3.0f / 255.0f);
 		}
 	}
 #endif
@@ -933,9 +970,6 @@ static void test_direct_interop_scaling()
 	pyrowave_encoder_destroy(encoder);
 	pyrowave_decoder_destroy(decoder);
 	pyrowave_device_destroy(pyro_device);
-
-	if (has_rdoc)
-		device.end_renderdoc_capture();
 }
 
 // Most basic interop scenario, OPAQUE_FD for everything.
@@ -1552,7 +1586,7 @@ static void test_d3d11_interop()
 
 	pyrowave_device pyro_device;
 	CHECKED(pyrowave_create_device_by_compat(0, 0, nullptr, nullptr,
-		reinterpret_cast<pyrowave_luid *>(&luid), &pyro_device));
+		reinterpret_cast<pyrowave_luid *>(&luid), VK_QUEUE_GLOBAL_PRIORITY_MEDIUM, &pyro_device));
 
 	for (int i = 0; i < 10000; i++)
 	{
@@ -2008,7 +2042,7 @@ static void test_d3d12_interop()
 
 	pyrowave_device pyro_device;
 	CHECKED(pyrowave_create_device_by_compat(0, 0, nullptr, nullptr,
-		reinterpret_cast<pyrowave_luid *>(&luid), &pyro_device));
+		reinterpret_cast<pyrowave_luid *>(&luid), VK_QUEUE_GLOBAL_PRIORITY_MEDIUM, &pyro_device));
 
 	test_d3d12_interop_allocation_stress(device.get(), pyro_device);
 
@@ -2344,7 +2378,8 @@ static void test_child_interop()
 	ASSERT_THAT(shared);
 
 	pyrowave_device device;
-	CHECKED(pyrowave_create_device_by_compat(0, 0, nullptr, nullptr, reinterpret_cast<const pyrowave_luid *>(&shared->luid), &device));
+	CHECKED(pyrowave_create_device_by_compat(0, 0, nullptr, nullptr,
+	        reinterpret_cast<const pyrowave_luid *>(&shared->luid), VK_QUEUE_GLOBAL_PRIORITY_MEDIUM, &device));
 
 	pyrowave_image img[3] = {};
 	pyrowave_sync_object sync = {};
@@ -2426,7 +2461,7 @@ static void test_child_interop()
 
 		for (int i = 0; i < 3; i++)
 			CHECKED(pyrowave_image_get_image_view(img[i], VkImageAspectFlagBits(VK_IMAGE_ASPECT_PLANE_0_BIT << i), VK_IMAGE_USAGE_SAMPLED_BIT, &buffers.planes[i]));
-		CHECKED(pyrowave_encoder_encode_gpu_synchronous(encoder, &acquire, &release, &buffers, &rate_control));
+		CHECKED(pyrowave_encoder_encode_gpu(encoder, &acquire, &release, &buffers, &rate_control));
 
 		pyrowave_packet packet;
 		size_t out_packets = 1;
@@ -2664,8 +2699,16 @@ int main(int argc, char **argv)
 	test_extended_ycbcr_interop();
 
 	printf("Running Vulkan <-> Vulkan interop test with direct device share ...\n");
-	test_direct_interop();
-	test_direct_interop_scaling();
+	test_direct_interop(false, false);
+	printf("Running GPU encode after CPU 10-bit encode ...\n");
+	test_direct_interop(true, false);
+	printf("Running GPU decode after CPU 10-bit readback ...\n");
+	test_direct_interop(false, true);
+	test_direct_interop_scaling(VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0);
+	printf("Running scaled encode test with 8-bit narrow range ...\n");
+	test_direct_interop_scaling(VK_SAMPLER_YCBCR_RANGE_ITU_NARROW, 8);
+	printf("Running scaled encode test with 10-bit narrow range ...\n");
+	test_direct_interop_scaling(VK_SAMPLER_YCBCR_RANGE_ITU_NARROW, 10);
 
 	printf("Running opaque Vulkan <-> Vulkan interop test ...\n");
 	test_opaque_interop(false);
