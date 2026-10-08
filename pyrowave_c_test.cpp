@@ -37,6 +37,9 @@ static void test_encoder_create_validation()
 
 	info.device = device;
 	CHECKED(pyrowave_encoder_create(&info, &encoder));
+	ASSERT_THAT(pyrowave_encoder_set_frame_context(encoder, -1) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	ASSERT_THAT(pyrowave_encoder_set_frame_context(encoder, PYROWAVE_MAX_FRAME_CONTEXTS) ==
+	            PYROWAVE_ERROR_INVALID_ARGUMENT);
 
 	pyrowave_color_metadata invalid_metadata = {};
 	invalid_metadata.transfer = static_cast<pyrowave_transfer_function>(-1);
@@ -180,7 +183,6 @@ static void test_high_precision_cpu_buffer_readback(bool fragment_path)
 	info.width = 16;
 	info.height = 16;
 	info.fragment_path = fragment_path;
-	info.output_bit_depth = 10;
 	pyrowave_decoder decoder;
 	CHECKED(pyrowave_create_default_device(&info.device));
 	CHECKED(pyrowave_decoder_create(&info, &decoder));
@@ -188,7 +190,7 @@ static void test_high_precision_cpu_buffer_readback(bool fragment_path)
 	for (bool padded : {false, true})
 	{
 		pyrowave_cpu_buffer buffer = {};
-		buffer.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV420P;
+		buffer.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV420P16;
 		buffer.width = info.width;
 		buffer.height = info.height;
 		std::vector<uint16_t> planes[3];
@@ -214,7 +216,24 @@ static void test_high_precision_cpu_buffer_readback(bool fragment_path)
 			ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &invalid) ==
 			            PYROWAVE_ERROR_INVALID_ARGUMENT);
 		}
-		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &buffer));
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_async(decoder, &buffer, -1) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_complete(decoder, &buffer, -1) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_async(decoder, &buffer, 0));
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_async(decoder, &buffer, 0) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		auto mismatched = buffer;
+		mismatched.plane_size_in_bytes[0]++;
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_complete(decoder, &mismatched, 0) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		mismatched = buffer;
+		mismatched.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV420P;
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_complete(decoder, &mismatched, 0) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_complete(decoder, &buffer, 0));
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_complete(decoder, &buffer, 0) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
 		for (int plane = 0; plane < 3; plane++)
 		{
 			const size_t width = plane == 0 ? 16 : 8;
@@ -264,27 +283,36 @@ static void test_encode_cpu_buffer_validation(bool nv12)
 
 	cpu_buffer.width = 16;
 	cpu_buffer.height = 16;
-	CHECKED(pyrowave_encoder_encode_cpu_synchronous(encoder, &cpu_buffer, &rate_control));
+	CHECKED(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control));
+
+	if (nv12)
+	{
+		auto misaligned = cpu_buffer;
+		misaligned.row_stride_in_bytes[1]++;
+		misaligned.plane_size_in_bytes[1] = misaligned.row_stride_in_bytes[1] * (info.height / 2);
+		ASSERT_THAT(pyrowave_encoder_encode_cpu(encoder, &misaligned, &rate_control) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+	}
 
 	// Mismatching width/height against encoder.
 	cpu_buffer.width = 15;
 	cpu_buffer.height = 16;
-	ASSERT_THAT(pyrowave_encoder_encode_cpu_synchronous(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	ASSERT_THAT(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
 
 	cpu_buffer.width = 16;
 	cpu_buffer.height = 15;
-	ASSERT_THAT(pyrowave_encoder_encode_cpu_synchronous(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	ASSERT_THAT(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
 
 	// Too small row strides.
 	cpu_buffer.width = 16;
 	cpu_buffer.height = 16;
 	cpu_buffer.row_stride_in_bytes[1] = nv12 ? 15 : 7;
-	ASSERT_THAT(pyrowave_encoder_encode_cpu_synchronous(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	ASSERT_THAT(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
 
 	// Too small plane size.
 	cpu_buffer.row_stride_in_bytes[1] = nv12 ? 16 : 8;
 	cpu_buffer.plane_size_in_bytes[1] = (nv12 ? 2 : 1) * 8 * 8 - 1;
-	ASSERT_THAT(pyrowave_encoder_encode_cpu_synchronous(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
+	ASSERT_THAT(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control) == PYROWAVE_ERROR_INVALID_ARGUMENT);
 
 	pyrowave_encoder_destroy(encoder);
 	pyrowave_device_destroy(info.device);
@@ -344,7 +372,7 @@ static void test_error_correction_api()
 	cpu_buffer.width = Width;
 	cpu_buffer.height = Height;
 	const pyrowave_rate_control rate_control = { 256 * 1024 };
-	CHECKED(pyrowave_encoder_encode_cpu_synchronous(encoder, &cpu_buffer, &rate_control));
+	CHECKED(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control));
 
 	size_t num_packets;
 	CHECKED(pyrowave_encoder_compute_num_packets_with_padding(encoder, 4 * 1024, 2000, &num_packets));
@@ -505,7 +533,7 @@ static void test_basic_encoder_roundtrip(bool fragment_decode, bool nv12_encode,
 	cpu_buffer.width = Width;
 	cpu_buffer.height = Height;
 	const pyrowave_rate_control rate_control = { 64 * 1024 }; // Just give it something massive.
-	CHECKED(pyrowave_encoder_encode_cpu_synchronous(encoder, &cpu_buffer, &rate_control));
+	CHECKED(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control));
 
 	size_t num_packets;
 	CHECKED(pyrowave_encoder_compute_num_packets(encoder, 64 * 1024, &num_packets));
@@ -610,13 +638,186 @@ static void test_basic_encoder_roundtrip(bool fragment_decode, bool nv12_encode,
 	pyrowave_device_destroy(device);
 }
 
+static void test_extended_cpu_formats(bool subsampled)
+{
+	pyrowave_device device;
+	CHECKED(pyrowave_create_default_device(&device));
+
+	constexpr int Width = 16;
+	constexpr int Height = 16;
+
+	pyrowave_encoder_create_info encoder_info = {};
+	encoder_info.device = device;
+	encoder_info.width = Width;
+	encoder_info.height = Height;
+	encoder_info.chroma = subsampled ? PYROWAVE_CHROMA_SUBSAMPLING_420 : PYROWAVE_CHROMA_SUBSAMPLING_444;
+
+	pyrowave_decoder_create_info decoder_info = {};
+	decoder_info.device = device;
+	decoder_info.width = Width;
+	decoder_info.height = Height;
+	decoder_info.chroma = subsampled ? PYROWAVE_CHROMA_SUBSAMPLING_420 : PYROWAVE_CHROMA_SUBSAMPLING_444;
+
+	pyrowave_decoder decoder;
+	pyrowave_encoder encoder;
+	CHECKED(pyrowave_decoder_create(&decoder_info, &decoder));
+	CHECKED(pyrowave_encoder_create(&encoder_info, &encoder));
+
+	const struct
+	{
+		pyrowave_cpu_buffer_format format;
+		int y, cb, cr;
+	} tests[] = {
+		{ subsampled ? PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10 : PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10, 0x3ff, 0x200, 0 },
+		{ subsampled ? PYROWAVE_CPU_BUFFER_FORMAT_YUV420P16 : PYROWAVE_CPU_BUFFER_FORMAT_YUV444P16, 0xffff, 0x8000, 0 },
+	};
+
+	for (auto &test : tests)
+	{
+		// 10-bit encode path.
+		uint16_t luma[Width * Height];
+		uint16_t cb[Width * Height];
+		uint16_t cr[Width * Height];
+
+		for (int i = 0; i < Width * Height; i++)
+		{
+			luma[i] = test.y;
+			cb[i] = test.cb;
+			cr[i] = test.cr;
+		}
+
+		pyrowave_cpu_buffer encode_buffer = {}, decode_buffer = {};
+
+		encode_buffer.data[0] = luma;
+		encode_buffer.data[1] = cb;
+		encode_buffer.data[2] = cr;
+		encode_buffer.format = test.format;
+		encode_buffer.width = Width;
+		encode_buffer.height = Height;
+		for (int i = 0; i < 3; i++)
+		{
+			encode_buffer.row_stride_in_bytes[i] = Width * sizeof(uint16_t);
+			encode_buffer.plane_size_in_bytes[i] = Width * Height * sizeof(uint16_t);
+			if (i && subsampled)
+				encode_buffer.plane_size_in_bytes[i] /= 2;
+		}
+
+		decode_buffer = encode_buffer;
+
+		const pyrowave_rate_control rate_control = { 64 * 1024 };
+
+		// Reuse this encoder after 8-bit planar/NV12 input so cached upload
+		// images must change format before reading the 10/16-bit input.
+		uint8_t warmup_planes[3][Width * Height];
+		memset(warmup_planes, 128, sizeof(warmup_planes));
+		pyrowave_cpu_buffer warmup = {};
+		warmup.width = Width;
+		warmup.height = Height;
+		warmup.format = subsampled ? PYROWAVE_CPU_BUFFER_FORMAT_YUV420P : PYROWAVE_CPU_BUFFER_FORMAT_YUV444P;
+		for (int plane = 0; plane < 3; plane++)
+		{
+			warmup.data[plane] = warmup_planes[plane];
+			warmup.row_stride_in_bytes[plane] = Width;
+			warmup.plane_size_in_bytes[plane] = Width * (subsampled && plane != 0 ? Height / 2 : Height);
+		}
+		size_t warmup_packets = 0;
+		CHECKED(pyrowave_encoder_encode_cpu(encoder, &warmup, &rate_control));
+		CHECKED(pyrowave_encoder_compute_num_packets(encoder, rate_control.maximum_bitstream_size, &warmup_packets));
+		if (subsampled)
+		{
+			warmup.format = PYROWAVE_CPU_BUFFER_FORMAT_NV12;
+			warmup.data[2] = nullptr;
+			CHECKED(pyrowave_encoder_encode_cpu(encoder, &warmup, &rate_control));
+			CHECKED(pyrowave_encoder_compute_num_packets(encoder, rate_control.maximum_bitstream_size, &warmup_packets));
+		}
+
+		std::vector<uint8_t> bitstream;
+		bitstream.reserve(rate_control.maximum_bitstream_size);
+		CHECKED(pyrowave_encoder_encode_cpu(encoder, &encode_buffer, &rate_control));
+
+		size_t after_packets = 0;
+		pyrowave_packet packet;
+		bitstream.resize(rate_control.maximum_bitstream_size);
+		CHECKED(pyrowave_encoder_packetize(encoder, &packet, rate_control.maximum_bitstream_size,
+				&after_packets, bitstream.data(), bitstream.size()));
+
+		CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.data() + packet.offset, packet.size));
+		decode_buffer.format = subsampled ? PYROWAVE_CPU_BUFFER_FORMAT_YUV420P16 : PYROWAVE_CPU_BUFFER_FORMAT_YUV444P16;
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &decode_buffer));
+
+		const auto abs_diff = [](int a, int b) { return std::abs(a - b); };
+
+		int ref_y, ref_cb, ref_cr;
+
+		if (test.format == PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10 ||
+		    test.format == PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10)
+		{
+			ref_y = (test.y * 0xffff + 0x1ff) / 0x3ff;
+			ref_cb = (test.cb * 0xffff + 0x1ff) / 0x3ff;
+			ref_cr = (test.cr * 0xffff + 0x1ff) / 0x3ff;
+		}
+		else
+		{
+			ref_y = test.y;
+			ref_cb = test.cb;
+			ref_cr = test.cr;
+		}
+
+		// The quantizers and FP math isn't accurate enough to resolve full 16-bit accuracy unless perhaps
+		// using full 32-bit precision everywhere.
+		for (int y = 0; y < Height; y++)
+		{
+			for (int x = 0; x < Width; x++)
+			{
+				ASSERT_THAT(abs_diff(luma[y * Width + x], ref_y) < 0x40);
+				if (!subsampled || (x < Width / 2 && y < Height / 2))
+				{
+					ASSERT_THAT(abs_diff(cb[y * Width + x], ref_cb) < 0x40);
+					ASSERT_THAT(abs_diff(cr[y * Width + x], ref_cr) < 0x40);
+				}
+			}
+		}
+
+		CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.data() + packet.offset, packet.size));
+		decode_buffer.format = subsampled ? PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10 : PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10;
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &decode_buffer));
+
+		if (test.format == PYROWAVE_CPU_BUFFER_FORMAT_YUV444P16 ||
+		    test.format == PYROWAVE_CPU_BUFFER_FORMAT_YUV420P16)
+		{
+			ref_y = (test.y * 0x3ff + 0x7fff) / 0xffff;
+			ref_cb = (test.cb * 0x3ff + 0x7fff) / 0xffff;
+			ref_cr = (test.cr * 0x3ff + 0x7fff) / 0xffff;
+		}
+		else
+		{
+			ref_y = test.y;
+			ref_cb = test.cb;
+			ref_cr = test.cr;
+		}
+
+		for (int y = 0; y < Height; y++)
+		{
+			for (int x = 0; x < Width; x++)
+			{
+				ASSERT_THAT(abs_diff(luma[y * Width + x], ref_y) <= 1);
+				if (!subsampled || (x < Width / 2 && y < Height / 2))
+				{
+					ASSERT_THAT(abs_diff(cb[y * Width + x], ref_cb) <= 1);
+					ASSERT_THAT(abs_diff(cr[y * Width + x], ref_cr) <= 1);
+				}
+			}
+		}
+	}
+}
+
 static void test_basic_system_stability(bool realtime_prio)
 {
 	pyrowave_device device;
 
 	if (realtime_prio)
 	{
-		CHECKED(pyrowave_create_device_by_compat2(0, 0, nullptr, nullptr, nullptr,
+		CHECKED(pyrowave_create_device_by_compat(0, 0, nullptr, nullptr, nullptr,
 			VK_QUEUE_GLOBAL_PRIORITY_REALTIME, &device));
 	}
 	else
@@ -707,8 +908,11 @@ static void test_basic_system_stability(bool realtime_prio)
 		// Get some test coverage for async compute path.
 		CHECKED(pyrowave_device_set_queue_type(device, iter % 2 ? VK_QUEUE_COMPUTE_BIT : VK_QUEUE_GRAPHICS_BIT));
 
+		// Very basic testing.
+		CHECKED(pyrowave_encoder_set_frame_context(encoder, iter % 2));
+
 		bitstream.reserve(rate_control.maximum_bitstream_size);
-		CHECKED(pyrowave_encoder_encode_cpu_synchronous(encoder, &encode_buffer, &rate_control));
+		CHECKED(pyrowave_encoder_encode_cpu(encoder, &encode_buffer, &rate_control));
 
 		size_t num_packets, after_packets;
 		CHECKED(pyrowave_encoder_compute_num_packets(encoder, 8 * 1024, &num_packets));
@@ -734,7 +938,8 @@ static void test_basic_system_stability(bool realtime_prio)
 		ASSERT_THAT(total_bitstream_size <= rate_control.maximum_bitstream_size);
 		ASSERT_THAT(total_bitstream_size >= 95 * rate_control.maximum_bitstream_size / 100);
 
-		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &decode_buffer));
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_async(decoder, &decode_buffer, iter % 2));
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_complete(decoder, &decode_buffer, iter % 2));
 	}
 
 	pyrowave_decoder_destroy(decoder);
@@ -803,6 +1008,9 @@ int main()
 			(variant & 1) != 0, (variant & 2) != 0,
 			(variant & 4) != 0 ? PYROWAVE_CHROMA_SUBSAMPLING_444 : PYROWAVE_CHROMA_SUBSAMPLING_420);
 	}
+
+	test_extended_cpu_formats(false);
+	test_extended_cpu_formats(true);
 
 	test_error_correction_api();
 

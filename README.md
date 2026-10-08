@@ -1,6 +1,6 @@
 # PyroWave
 
-PyroWave is an intra-only video codec (practially speaking a still-image codec)
+PyroWave is an intra-only video codec (practically speaking a still-image codec)
 that is optimized for extremely fast GPU encode (< ~0.1 ms encode and decode at 1080p, < ~0.2 ms at 4K).
 It is fully implemented in Vulkan compute shaders.
 
@@ -45,7 +45,7 @@ PyroWave has been battled tested over long distance streaming over fiber links.
 
 ### Bitstream definition
 
-See [docs/bitstream.md]()
+See [bitstream/bitstream.md](bitstream/bitstream.md)
 
 ## Building
 
@@ -53,7 +53,14 @@ PyroWave is intended to be built alongside PyroFling with Granite in the normal 
 
 ### Standalone C API
 
-NOTE: This API is still under development and the API/ABI is not yet quite stable.
+The upstream C API is version 1.0.0. This fork's Vulkan C API exposes version 101.0.0, with
+additional color-metadata entry points and a negotiated HLG bitstream extension.
+Consumers that require these extensions must check the runtime version and
+entry points before creating a decoder; 0.6.x libraries are not ABI compatible.
+The fork's version line is separate from upstream releases. An upstream 1.x
+runtime must not be substituted for the fork runtime required by a consumer.
+The upstream Metal port remains at 1.0.0 and does not provide these fork-specific
+color-metadata/HLG extensions.
 
 A pinned Granite revision is tracked as a PyroWave third-party submodule.
 Initialize the repository and its nested dependencies before configuring CMake:
@@ -73,12 +80,12 @@ $ ninja install
 [0/1] Install the project...
 -- Install configuration: "Release"
 -- Installing: ...../build/output/include/pyrowave/pyrowave.h
--- Installing: ...../build/output/lib/libpyrowave-shared.so.0.0.0
--- Installing: ...../build/output/lib/libpyrowave-shared.so.0
+-- Installing: ...../build/output/lib/libpyrowave-shared.so.101.0.0
+-- Installing: ...../build/output/lib/libpyrowave-shared.so.101
 -- Installing: ...../build/output/lib/libpyrowave-shared.so
 -- Installing: ...../build/output/share/pyrowave-shared/cmake/pyrowave-sharedConfig.cmake
 -- Installing: ...../build/output/share/pyrowave-shared/cmake/pyrowave-sharedConfig-release.cmake
--- Installing: ...../build/output/share/pkgconfig/pyrowave-shared.pc
+-- Installing: ...../build/output/lib/pkgconfig/pyrowave-shared.pc
 ```
 
 The build is tested on Linux, MinGW, msys2 and MSVC.
@@ -86,6 +93,26 @@ See `pyrowave-c-test` which unit tests the shared C API.
 That test also serves as a basic user guide for the API.
 
 `build-steamrt.sh` builds against the Sniper SDK and is also supported.
+
+#### Buffer and color contracts
+
+CPU output precision is selected by `pyrowave_cpu_buffer.format`: planar
+8-bit, 10-bit LSB-in-16-bit, or 16-bit UNORM. GPU output precision is selected
+by the image/view formats supplied in `pyrowave_gpu_buffers`. The decoder
+creation structure does not contain an output-bit-depth field.
+
+Frame context 0 retains the synchronous workflow. Explicitly selecting the
+two frame contexts enables pipelined CPU readback/encode; it does not change
+the native bitstream or impose pipelining on applications. An asynchronous
+readback must be completed before that context is reused. Completion must
+provide the same dimensions, format, strides and plane sizes as its start;
+data pointers may change.
+
+RGB scaled encode supports full and narrow YCbCr ranges through
+`ycbcr_range` and `ycbcr_range_bit_depth`. These parameters describe pixel
+quantization; applications must separately signal matching color metadata.
+HDR mastering/content-light metadata is presentation data, not the PyroWave
+color-metadata structure.
 
 #### Installed static C API
 

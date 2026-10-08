@@ -55,6 +55,7 @@ enum
 enum
 {
 	COLOR_PRIMARIES_BT709 = 0,
+	COLOR_PRIMARIES_SRGB = COLOR_PRIMARIES_BT709,
 	COLOR_PRIMARIES_BT2020 = 1
 };
 
@@ -67,6 +68,8 @@ enum
 enum
 {
 	TRANSFER_FUNCTION_BT709 = 0,
+	// Upstream's code=0 name; the alias preserves the wire value, not EOTF equivalence.
+	TRANSFER_FUNCTION_SRGB = TRANSFER_FUNCTION_BT709,
 	TRANSFER_FUNCTION_PQ = 1,
 	TRANSFER_FUNCTION_HLG = 2
 };
