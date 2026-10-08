@@ -181,6 +181,17 @@ static void run_decoder(Device &device, const char *out_path, const char *in_pat
 		LOGE("Invalid magic.\n");
 		return;
 	}
+	if (header.header_version != 1)
+	{
+		LOGE("Unsupported PWV1 header version: %u.\n", unsigned(header.header_version));
+		return;
+	}
+	if (header.reference_bit_depth != 0 && header.reference_bit_depth != 8 &&
+	    header.reference_bit_depth != 10 && header.reference_bit_depth != 16)
+	{
+		LOGE("Unsupported PWV1 reference bit depth: %u.\n", unsigned(header.reference_bit_depth));
+		return;
+	}
 
 	PyroWave::Decoder dec;
 	int width = header.pyro.width_minus_1 + 1;

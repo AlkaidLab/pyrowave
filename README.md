@@ -114,6 +114,11 @@ quantization; applications must separately signal matching color metadata.
 HDR mastering/content-light metadata is presentation data, not the PyroWave
 color-metadata structure.
 
+CPU encode/decode selects the scaling factor for each buffer format without
+changing the scaling configured for later GPU calls. The fragment decoder
+does not support non-default scaling, so 10-bit LSB CPU readback returns
+`PYROWAVE_ERROR_NOT_IMPLEMENTED`; 8-bit and 16-bit UNORM readback are supported.
+
 #### Installed static C API
 
 Configure with `-DPYROWAVE_BUILD_SHARED=OFF -DPYROWAVE_BUILD_STATIC_C_API=ON`.

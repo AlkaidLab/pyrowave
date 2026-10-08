@@ -6,7 +6,6 @@
 #define PYROWAVE_H_
 
 #if !defined(VULKAN_CORE_H_)
-#warning "Should include vulkan headers before including pyrowave.h"
 #include <vulkan/vulkan.h>
 #endif
 
@@ -498,7 +497,7 @@ PYROWAVE_PUBLIC_API pyrowave_result
 pyrowave_encoder_create(const pyrowave_encoder_create_info *info, pyrowave_encoder *encoder);
 
 // Special purpose when encoding formats like yuv420p10 or yuv444p10 as used in e.g. FFmpeg.
-// For CPU encode path, this is set automatically.
+// CPU encode chooses its own per-call factor without changing this GPU setting.
 // Defaults to 1.0. For e.g. 10-bit LSB encoding stored in UNORM16, use factor of 0xffff / 0x3ff.
 PYROWAVE_PUBLIC_API void
 pyrowave_encoder_set_ycbcr_scaling_factor(pyrowave_encoder encoder, float factor);
@@ -715,7 +714,7 @@ PYROWAVE_PUBLIC_API pyrowave_result
 pyrowave_decoder_decode_cpu_buffer_complete(pyrowave_decoder decoder, const pyrowave_cpu_buffer *buffers, int context);
 
 // Special purpose when decoding to special formats like yuv420p10 or yuv444p10 as used in e.g. FFmpeg.
-// For CPU decode path, this is set automatically when decoding.
+// CPU decode chooses its own per-call factor without changing this GPU setting.
 // Defaults to 1.0. For e.g. 10-bit LSB encoding stored in UNORM16, use factor of 0x3ff / 0xffff.
 // Not compatible with fragment decoding path for now.
 PYROWAVE_PUBLIC_API void

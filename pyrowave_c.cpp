@@ -1213,6 +1213,24 @@ pyrowave_encoder_encode_gpu_inner(pyrowave_encoder encoder,
 	return PYROWAVE_SUCCESS;
 }
 
+static pyrowave_result
+pyrowave_encoder_encode_gpu_with_scale(pyrowave_encoder encoder,
+                                       const pyrowave_gpu_sync_operation *acquire,
+                                       const pyrowave_gpu_sync_operation *release,
+                                       const pyrowave_gpu_buffers *buffers,
+                                       const pyrowave_rate_control *rate_control,
+                                       float range_scale)
+{
+	auto *device = encoder->device;
+	WrappedViewBuffers views = {};
+	if (!views.wrap(device, buffers, VK_IMAGE_USAGE_SAMPLED_BIT))
+		return PYROWAVE_ERROR_OUT_OF_HOST_MEMORY;
+	views.range_scale = range_scale;
+	device->next_frame_context();
+	pyrowave_device_wait_semaphore(device, encoder->pyro_device->queue_type, acquire, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+	return pyrowave_encoder_encode_gpu_inner(encoder, acquire, release, views, rate_control);
+}
+
 pyrowave_result
 pyrowave_encoder_encode_gpu(pyrowave_encoder encoder,
                             const pyrowave_gpu_sync_operation *acquire,
@@ -1220,14 +1238,8 @@ pyrowave_encoder_encode_gpu(pyrowave_encoder encoder,
                             const pyrowave_gpu_buffers *buffers,
                             const pyrowave_rate_control *rate_control)
 {
-	auto *device = encoder->device;
-	WrappedViewBuffers views = {};
-	if (!views.wrap(device, buffers, VK_IMAGE_USAGE_SAMPLED_BIT))
-		return PYROWAVE_ERROR_OUT_OF_HOST_MEMORY;
-	views.range_scale = encoder->ycbcr_scaling_factor;
-	device->next_frame_context();
-	pyrowave_device_wait_semaphore(device, encoder->pyro_device->queue_type, acquire, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-	return pyrowave_encoder_encode_gpu_inner(encoder, acquire, release, views, rate_control);
+	return pyrowave_encoder_encode_gpu_with_scale(encoder, acquire, release, buffers, rate_control,
+	                                              encoder->ycbcr_scaling_factor);
 }
 
 pyrowave_result
@@ -1468,15 +1480,9 @@ pyrowave_encoder_encode_cpu(pyrowave_encoder encoder, const pyrowave_cpu_buffer 
 	if (encoder->chroma == ChromaSubsampling::Chroma444 && pyrowave_cpu_buffer_format_subsampled(buffers->format))
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
-	if (buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10 ||
-		buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10)
-	{
-		pyrowave_encoder_set_ycbcr_scaling_factor(encoder, float(0xffff) / float(0x3ff));
-	}
-	else
-	{
-		pyrowave_encoder_set_ycbcr_scaling_factor(encoder, 1.0f);
-	}
+	const float range_scale = buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10 ||
+	                          buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10
+	                          ? float(0xffff) / float(0x3ff) : 1.0f;
 
 	Util::register_thread_index(0);
 
@@ -1606,8 +1612,7 @@ pyrowave_encoder_encode_cpu(pyrowave_encoder encoder, const pyrowave_cpu_buffer 
 	device->submit(cmd, nullptr, 1, &sem);
 	device->add_wait_semaphore(encoder->pyro_device->queue_type, std::move(sem), VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, true);
 
-	auto ret = pyrowave_encoder_encode_gpu(encoder, nullptr, nullptr, &gpu_buffers, rate_control);
-	return ret;
+	return pyrowave_encoder_encode_gpu_with_scale(encoder, nullptr, nullptr, &gpu_buffers, rate_control, range_scale);
 }
 
 pyrowave_result
@@ -1907,16 +1912,17 @@ bool pyrowave_decoder_decode_is_ready_with_sideband(pyrowave_decoder decoder, bo
 	                                        active_block_mask, word_count);
 }
 
-pyrowave_result
-pyrowave_decoder_decode_gpu_buffer(pyrowave_decoder decoder,
-                                   const pyrowave_gpu_sync_operation *acquire,
-                                   const pyrowave_gpu_sync_operation *release,
-                                   const pyrowave_gpu_buffers *buffers)
+static pyrowave_result
+pyrowave_decoder_decode_gpu_buffer_with_scale(pyrowave_decoder decoder,
+                                              const pyrowave_gpu_sync_operation *acquire,
+                                              const pyrowave_gpu_sync_operation *release,
+                                              const pyrowave_gpu_buffers *buffers,
+                                              float range_scale)
 {
 	if (decoder->pyro_device->cmd && (acquire || release))
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
-	if (decoder->fragment_path && decoder->ycbcr_scaling_factor != 1.0f)
+	if (decoder->fragment_path && range_scale != 1.0f)
 		return PYROWAVE_ERROR_NOT_IMPLEMENTED;
 
 	Util::register_thread_index(0);
@@ -1928,7 +1934,7 @@ pyrowave_decoder_decode_gpu_buffer(pyrowave_decoder decoder,
 	WrappedViewBuffers views = {};
 	if (!views.wrap(device, buffers, decoder->fragment_path ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : VK_IMAGE_USAGE_STORAGE_BIT))
 		return PYROWAVE_ERROR_OUT_OF_HOST_MEMORY;
-	views.range_scale = decoder->ycbcr_scaling_factor;
+	views.range_scale = range_scale;
 
 	// Just use normal graphics queue here since the result will likely be consumed there.
 	auto cmd = decoder->pyro_device->cmd
@@ -1999,6 +2005,16 @@ pyrowave_decoder_decode_gpu_buffer(pyrowave_decoder decoder,
 }
 
 pyrowave_result
+pyrowave_decoder_decode_gpu_buffer(pyrowave_decoder decoder,
+                                   const pyrowave_gpu_sync_operation *acquire,
+                                   const pyrowave_gpu_sync_operation *release,
+                                   const pyrowave_gpu_buffers *buffers)
+{
+	return pyrowave_decoder_decode_gpu_buffer_with_scale(decoder, acquire, release, buffers,
+	                                                     decoder->ycbcr_scaling_factor);
+}
+
+pyrowave_result
 pyrowave_decoder_decode_cpu_buffer_async(pyrowave_decoder decoder, const pyrowave_cpu_buffer *buffers, int context_index)
 {
 	if (!decoder || !buffers || context_index < 0 || context_index >= PYROWAVE_MAX_FRAME_CONTEXTS)
@@ -2029,15 +2045,9 @@ pyrowave_decoder_decode_cpu_buffer_async(pyrowave_decoder decoder, const pyrowav
 	if (decoder->chroma == ChromaSubsampling::Chroma444 && pyrowave_cpu_buffer_format_subsampled(buffers->format))
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
-	if (buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10 ||
-	    buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10)
-	{
-		pyrowave_decoder_set_ycbcr_scaling_factor(decoder, float(0x3ff) / float(0xffff));
-	}
-	else
-	{
-		pyrowave_decoder_set_ycbcr_scaling_factor(decoder, 1.0f);
-	}
+	const float range_scale = buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10 ||
+	                          buffers->format == PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10
+	                          ? float(0x3ff) / float(0xffff) : 1.0f;
 
 	const size_t plane_bpp = pyrowave_cpu_buffer_format_16bit(buffers->format) ? 2 : 1;
 
@@ -2062,6 +2072,9 @@ pyrowave_decoder_decode_cpu_buffer_async(pyrowave_decoder decoder, const pyrowav
 		if (buffers->row_stride_in_bytes[plane] > buffers->plane_size_in_bytes[plane] / plane_height)
 			return PYROWAVE_ERROR_INVALID_ARGUMENT;
 	}
+
+	if (decoder->fragment_path && range_scale != 1.0f)
+		return PYROWAVE_ERROR_NOT_IMPLEMENTED;
 
 	for (int plane = 0; plane < 3; plane++)
 	{
@@ -2147,7 +2160,7 @@ pyrowave_decoder_decode_cpu_buffer_async(pyrowave_decoder decoder, const pyrowav
 
 	BufferCreateInfo bufinfo = {};
 
-	auto res = pyrowave_decoder_decode_gpu_buffer(decoder, nullptr, nullptr, &gpu_buffers);
+	auto res = pyrowave_decoder_decode_gpu_buffer_with_scale(decoder, nullptr, nullptr, &gpu_buffers, range_scale);
 	if (res != PYROWAVE_SUCCESS)
 		return res;
 
@@ -2229,6 +2242,7 @@ pyrowave_decoder_decode_cpu_buffer_complete(pyrowave_decoder decoder, const pyro
 
 	auto *device = decoder->device;
 	context.fence->wait();
+	context.fence.reset();
 
 	for (int plane = 0; plane < 3; plane++)
 	{
@@ -2237,7 +2251,6 @@ pyrowave_decoder_decode_cpu_buffer_complete(pyrowave_decoder decoder, const pyro
 			return PYROWAVE_ERROR_OUT_OF_HOST_MEMORY;
 		memcpy(buffers->data[plane], mapped, buffers->plane_size_in_bytes[plane]);
 	}
-	context.fence.reset();
 
 	return PYROWAVE_SUCCESS;
 }

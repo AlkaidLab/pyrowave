@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Hans-Kristian Arntzen
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 AlkaidLab contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-only
 
 #define INITGUID
 
@@ -504,7 +505,7 @@ static void validate_granite_image(Device &device, Image &img, SemaphoreHolder &
 	validate_mirror_buffer(device, *cr, 640, 360, 5, 7);
 }
 
-static void test_direct_interop()
+static void test_direct_interop(bool cpu_encoder_first, bool cpu_decoder_first)
 {
 	ASSERT_THAT(Context::init_loader(nullptr));
 
@@ -604,6 +605,27 @@ static void test_direct_interop()
 
 	pyrowave_rate_control rate_control = { 100000 };
 	pyrowave_gpu_buffers gpu_buffers = {};
+	uint16_t cpu_planes[3][64 * 64] = {};
+	pyrowave_cpu_buffer cpu_buffer = {};
+	cpu_buffer.width = 64;
+	cpu_buffer.height = 64;
+	cpu_buffer.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV444P10;
+	for (int plane = 0; plane < 3; plane++)
+	{
+		cpu_buffer.data[plane] = cpu_planes[plane];
+		cpu_buffer.row_stride_in_bytes[plane] = 64 * sizeof(uint16_t);
+		cpu_buffer.plane_size_in_bytes[plane] = sizeof(cpu_planes[plane]);
+	}
+	if (cpu_encoder_first)
+	{
+		CHECKED(pyrowave_encoder_encode_cpu(encoder, &cpu_buffer, &rate_control));
+		size_t cpu_packets = 0;
+		CHECKED(pyrowave_encoder_compute_num_packets(encoder, rate_control.maximum_bitstream_size, &cpu_packets));
+		auto invalid = cpu_buffer;
+		invalid.row_stride_in_bytes[0]++;
+		ASSERT_THAT(pyrowave_encoder_encode_cpu(encoder, &invalid, &rate_control) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+	}
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -642,6 +664,14 @@ static void test_direct_interop()
 
 	CHECKED(pyrowave_decoder_push_packet(decoder, bitstream.get() + packet.offset, packet.size));
 	ASSERT_THAT(pyrowave_decoder_decode_is_ready(decoder, false));
+	if (cpu_decoder_first)
+	{
+		CHECKED(pyrowave_decoder_decode_cpu_buffer_synchronous(decoder, &cpu_buffer));
+		auto invalid = cpu_buffer;
+		invalid.row_stride_in_bytes[0]++;
+		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_async(decoder, &invalid, 0) ==
+		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+	}
 
 	for (auto &plane : gpu_buffers.planes)
 	{
@@ -2669,7 +2699,11 @@ int main(int argc, char **argv)
 	test_extended_ycbcr_interop();
 
 	printf("Running Vulkan <-> Vulkan interop test with direct device share ...\n");
-	test_direct_interop();
+	test_direct_interop(false, false);
+	printf("Running GPU encode after CPU 10-bit encode ...\n");
+	test_direct_interop(true, false);
+	printf("Running GPU decode after CPU 10-bit readback ...\n");
+	test_direct_interop(false, true);
 	test_direct_interop_scaling(VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0);
 	printf("Running scaled encode test with 8-bit narrow range ...\n");
 	test_direct_interop_scaling(VK_SAMPLER_YCBCR_RANGE_ITU_NARROW, 8);

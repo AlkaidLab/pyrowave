@@ -2,7 +2,6 @@
 // Copyright (c) 2026 AlkaidLab contributors
 // SPDX-License-Identifier: MIT AND GPL-3.0-only
 
-#include "vulkan/vulkan.h"
 #include "pyrowave.h"
 #include <stdio.h>
 #include <cstdlib>
@@ -187,6 +186,7 @@ static void test_high_precision_cpu_buffer_readback(bool fragment_path)
 	CHECKED(pyrowave_create_default_device(&info.device));
 	CHECKED(pyrowave_decoder_create(&info, &decoder));
 
+	pyrowave_decoder_set_ycbcr_scaling_factor(decoder, 2.0f);
 	for (bool padded : {false, true})
 	{
 		pyrowave_cpu_buffer buffer = {};
@@ -220,6 +220,13 @@ static void test_high_precision_cpu_buffer_readback(bool fragment_path)
 		            PYROWAVE_ERROR_INVALID_ARGUMENT);
 		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_complete(decoder, &buffer, -1) ==
 		            PYROWAVE_ERROR_INVALID_ARGUMENT);
+		if (fragment_path)
+		{
+			auto unsupported = buffer;
+			unsupported.format = PYROWAVE_CPU_BUFFER_FORMAT_YUV420P10;
+			ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_async(decoder, &unsupported, 0) ==
+			            PYROWAVE_ERROR_NOT_IMPLEMENTED);
+		}
 		CHECKED(pyrowave_decoder_decode_cpu_buffer_async(decoder, &buffer, 0));
 		ASSERT_THAT(pyrowave_decoder_decode_cpu_buffer_async(decoder, &buffer, 0) ==
 		            PYROWAVE_ERROR_INVALID_ARGUMENT);
@@ -662,6 +669,9 @@ static void test_extended_cpu_formats(bool subsampled)
 	pyrowave_encoder encoder;
 	CHECKED(pyrowave_decoder_create(&decoder_info, &decoder));
 	CHECKED(pyrowave_encoder_create(&encoder_info, &encoder));
+
+	pyrowave_encoder_set_ycbcr_scaling_factor(encoder, 0.5f);
+	pyrowave_decoder_set_ycbcr_scaling_factor(decoder, 2.0f);
 
 	const struct
 	{
