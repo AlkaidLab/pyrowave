@@ -329,15 +329,22 @@ static bool pyrowave_device_confirm_external_semaphore_support(pyrowave_device d
 	sem_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
 #endif
 
+	// NOTE: these driver-reported features are intentionally NOT used to reject the device.
+	// Measured values:
+	//   Intel Arc B390: 0x0 for every handle type;
+	//   AMD Radeon:     0x8 for D3D12_FENCE, which is not a defined
+	//                   VkExternalSemaphoreFeatureFlagBits value (only EXPORTABLE = 0x1 and
+	//                   IMPORTABLE = 0x2 exist).
+	// Importing a real D3D11 fence handle as a timeline semaphore works on both of them
+	// (verified functionally: a D3D11 Signal() on the shared fence is observed by
+	// vkGetSemaphoreCounterValueKHR), so this query is not a usable capability signal.
+	// Leave the decision to the actual vkCreateSemaphore / vkImportSemaphoreWin32HandleKHR
+	// calls performed by pyrowave_sync_object_create().
 	type_info.semaphoreType = VK_SEMAPHORE_TYPE_BINARY;
 	vkGetPhysicalDeviceExternalSemaphoreProperties(device->device.get_physical_device(), &sem_info, &sem_props);
-	if (!(sem_props.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT))
-		return false;
 
 	type_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
 	vkGetPhysicalDeviceExternalSemaphoreProperties(device->device.get_physical_device(), &sem_info, &sem_props);
-	if (!(sem_props.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT))
-		return false;
 
 #ifdef _WIN32
 	// Despite being a timeline, D3D12_FENCE was added before TIMELINE was added, and AMD drivers have
@@ -345,8 +352,6 @@ static bool pyrowave_device_confirm_external_semaphore_support(pyrowave_device d
 	sem_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT;
 	sem_info.pNext = nullptr;
 	vkGetPhysicalDeviceExternalSemaphoreProperties(device->device.get_physical_device(), &sem_info, &sem_props);
-	if (!(sem_props.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT))
-		return false;
 #endif
 
 	return true;
@@ -365,13 +370,14 @@ static bool pyrowave_device_confirm_external_memory_support(pyrowave_device devi
 		return false;
 #endif
 
+	// Only the handle type that is actually imported at runtime is required here. The KMT
+	// variants (D3D11_TEXTURE_KMT / OPAQUE_WIN32_KMT) are deprecated and rejected outright by
+	// modern drivers (Intel returns VK_ERROR_FORMAT_NOT_SUPPORTED for both), so requiring all
+	// five types used to reject machines that import D3D11_TEXTURE fine.
+	// Windows only ever imports VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT.
 	static const VkExternalMemoryHandleTypeFlagBits required_external_types[] = {
 #ifdef _WIN32
 		VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT,
 #else
 		VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
 		VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
