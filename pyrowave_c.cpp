@@ -941,11 +941,13 @@ pyrowave_encoder_set_color_metadata(pyrowave_encoder encoder,
 	if (!encoder || !metadata || !valid_color_metadata(*metadata))
 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
 
+	// BitstreamColorMetadata stores plain uint32_t values; casting the C enums back to their own
+	// enum type narrows on MSVC (C2397) inside a braced-init-list.
 	encoder->encoder.set_color_metadata({
-		static_cast<pyrowave_color_primaries>(metadata->primaries),
-		static_cast<pyrowave_transfer_function>(metadata->transfer),
-		static_cast<pyrowave_ycbcr_transform>(metadata->transform),
-		static_cast<pyrowave_ycbcr_range>(metadata->range),
+		static_cast<uint32_t>(metadata->primaries),
+		static_cast<uint32_t>(metadata->transfer),
+		static_cast<uint32_t>(metadata->transform),
+		static_cast<uint32_t>(metadata->range),
 		metadata->chroma_siting,
 	});
 	encoder->color_metadata = *metadata;
