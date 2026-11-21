@@ -87,26 +87,33 @@ void Decoder::Impl::upload_payload(CommandBuffer &cmd)
 			VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
 		bufinfo.domain = BufferDomain::Device;
 		payload_data = device->create_buffer(bufinfo);
-		device->set_name(*payload_data, "payload-data");
+		if (payload_data)
+			device->set_name(*payload_data, "payload-data");
 
-		if (use_readonly_texel_buffer)
-		{
-			BufferViewCreateInfo view_info = {};
-			view_info.buffer = payload_data.get();
-			view_info.range = VK_WHOLE_SIZE;
-
-			view_info.format = VK_FORMAT_R8_UINT;
-			payload_u8_view = device->create_buffer_view(view_info);
-			view_info.format = VK_FORMAT_R16_UINT;
-			payload_u16_view = device->create_buffer_view(view_info);
-			view_info.format = VK_FORMAT_R32_UINT;
-			payload_u32_view = device->create_buffer_view(view_info);
-		}
+		payload_u8_view.reset();
+		payload_u16_view.reset();
+		payload_u32_view.reset();
 
 		// This shouldn't happen to demote to texel buffers if we need to deal with massive gigantic payloads.
 		payload_r8_image.reset();
 		payload_r16_image.reset();
 		payload_r32_image.reset();
+	}
+
+	if (use_readonly_texel_buffer && payload_data &&
+	    !(payload_r8_image && payload_r16_image && payload_r32_image) &&
+	    (!payload_u8_view || !payload_u16_view || !payload_u32_view))
+	{
+		BufferViewCreateInfo view_info = {};
+		view_info.buffer = payload_data.get();
+		view_info.range = VK_WHOLE_SIZE;
+
+		view_info.format = VK_FORMAT_R8_UINT;
+		payload_u8_view = device->create_buffer_view(view_info);
+		view_info.format = VK_FORMAT_R16_UINT;
+		payload_u16_view = device->create_buffer_view(view_info);
+		view_info.format = VK_FORMAT_R32_UINT;
+		payload_u32_view = device->create_buffer_view(view_info);
 	}
 
 	if (need_image_transition)
@@ -125,7 +132,7 @@ void Decoder::Impl::upload_payload(CommandBuffer &cmd)
 		need_image_transition = false;
 	}
 
-	if (!payload_data_cpu.empty())
+	if (payload_data && !payload_data_cpu.empty())
 		memcpy(cmd.update_buffer(*payload_data, 0, required_size), payload_data_cpu.data(), required_size);
 }
 
@@ -326,12 +333,33 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
 		return false;
 	}
 
-	if (payload_r8_image && payload_r16_image && payload_r32_image)
+	const bool use_linear_images = payload_r8_image && payload_r16_image && payload_r32_image;
+	if (use_linear_images)
 		cmd.set_program(shaders.wavelet_dequant[2]);
 	else if (use_readonly_texel_buffer)
+	{
+		if (!payload_u32_view || !payload_u16_view || !payload_u8_view)
+		{
+			LOGE("Payload texel buffer views are unavailable.\n");
+			return false;
+		}
 		cmd.set_program(shaders.wavelet_dequant[1]);
+	}
 	else
+	{
+		if (!payload_data)
+		{
+			LOGE("Payload buffer is unavailable.\n");
+			return false;
+		}
 		cmd.set_program(shaders.wavelet_dequant[0]);
+	}
+
+	if (!dequant_offset_buffer)
+	{
+		LOGE("Dequant offset buffer is unavailable.\n");
+		return false;
+	}
 
 	cmd.begin_region("DWT dequant");
 	auto start_dequant = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -374,7 +402,7 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
 				cmd.set_storage_texture(0, 0, *component_layer_views[component][level]);
 				cmd.set_storage_buffer(0, 1, *dequant_offset_buffer);
 
-				if (payload_r8_image && payload_r16_image && payload_r32_image)
+				if (use_linear_images)
 				{
 					cmd.set_texture(0, 2, payload_r32_image->get_view());
 					cmd.set_texture(0, 3, payload_r16_image->get_view());
@@ -991,6 +1019,8 @@ void Decoder::Impl::check_linear_texture_support()
 	bufinfo.allocation_requirements.size = 4 * 1024 * 1024;
 	bufinfo.allocation_requirements.memoryTypeBits = UINT32_MAX;
 	payload_data = device->create_buffer(bufinfo);
+	if (!payload_data)
+		return;
 	device->set_name(*payload_data, "payload-data");
 
 	const auto *alias = &payload_data->get_allocation();
@@ -1018,7 +1048,18 @@ void Decoder::Impl::check_linear_texture_support()
 	}
 
 	if (payload_r8_image && payload_r16_image && payload_r32_image)
+	{
 		LOGI("Using linear textures instead of texel buffers.\n");
+	}
+	else
+	{
+		// Clean up partial linear images and the 4 MiB aliased buffer so
+		// upload_payload() falls back to texel buffer views cleanly.
+		payload_r8_image.reset();
+		payload_r16_image.reset();
+		payload_r32_image.reset();
+		payload_data.reset();
+	}
 }
 
 bool Decoder::init(Vulkan::Device *device, int width, int height, ChromaSubsampling chroma_, bool fragment_path_)
